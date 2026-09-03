@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Color Converter - MVC</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Color Converter</h1>
+
+    <div class="top-panel">
+      <div class="control-card">
+        <label for="illuminant">Illuminant:</label>
+        <select id="illuminant">
+          <option value="D65" selected>D65 (Daylight)</option>
+          <option value="D50">D50 (Print)</option>
+          <option value="E">E (Equal Energy)</option>
+        </select>
+      </div>
+
+      <div class="control-card">
+        <label for="cmykMode">CMYK Mode:</label>
+        <select id="cmykMode">
+          <option value="UCR" selected>UCR</option>
+          <option value="GCR">GCR</option>
+        </select>
+      </div>
+
+      <div class="control-card">
+        <label for="gamutStrategy">Gamut Strategy:</label>
+        <select id="gamutStrategy">
+          <option value="clipping" selected>Clipping</option>
+          <option value="scaling">Scaling</option>
+        </select>
+      </div>
+
+      <div class="control-card picker-box">
+        <label for="nativePicker">Picker:</label>
+        <input type="color" id="nativePicker" value="#ff0000">
+        <div id="colorPreview" class="preview"></div>
+      </div>
+    </div>
+
+    <div id="warning" class="warning hidden">
+      Gamut Warning: Color out of range (adjusted).
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>CMYK</h2>
+        <div class="row">
+          <label>C (%): <input type="number" id="inputC" min="0" max="100"></label>
+          <input type="range" id="rangeC" min="0" max="100">
+        </div>
+        <div class="row">
+          <label>M (%): <input type="number" id="inputM" min="0" max="100"></label>
+          <input type="range" id="rangeM" min="0" max="100">
+        </div>
+        <div class="row">
+          <label>Y (%): <input type="number" id="inputY" min="0" max="100"></label>
+          <input type="range" id="rangeY" min="0" max="100">
+        </div>
+        <div class="row">
+          <label>K (%): <input type="number" id="inputK" min="0" max="100"></label>
+          <input type="range" id="rangeK" min="0" max="100">
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>LAB</h2>
+        <div class="row">
+          <label>L: <input type="number" id="inputL" min="0" max="100"></label>
+          <input type="range" id="rangeL" min="0" max="100">
+        </div>
+        <div class="row">
+          <label>a: <input type="number" id="inputA" min="-128" max="127"></label>
+          <input type="range" id="rangeA" min="-128" max="127">
+        </div>
+        <div class="row">
+          <label>b: <input type="number" id="inputB" min="-128" max="127"></label>
+          <input type="range" id="rangeB" min="-128" max="127">
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>HSV</h2>
+        <div class="row">
+          <label>H (°): <input type="number" id="inputH" min="0" max="360"></label>
+          <input type="range" id="rangeH" min="0" max="360">
+        </div>
+        <div class="row">
+          <label>S (%): <input type="number" id="inputS" min="0" max="100"></label>
+          <input type="range" id="rangeS" min="0" max="100">
+        </div>
+        <div class="row">
+          <label>V (%): <input type="number" id="inputV" min="0" max="100"></label>
+          <input type="range" id="rangeV" min="0" max="100">
+        </div>
+      </div>
+    </div>
+
+    <div class="tests-card">
+      <h2>Automated Unit Tests</h2>
+      <button id="runTestsBtn">Run Tests</button>
+      <div id="testResults" class="test-results"></div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
