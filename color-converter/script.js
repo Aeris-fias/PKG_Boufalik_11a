@@ -235,6 +235,7 @@ const View = {
     gamutStrategy: document.getElementById('gamutStrategy'),
     nativePicker: document.getElementById('nativePicker'),
     colorPreview: document.getElementById('colorPreview'),
+    hexValue: document.getElementById('hexValue'),
     warning: document.getElementById('warning'),
     testResults: document.getElementById('testResults'),
     runTestsBtn: document.getElementById('runTestsBtn')
@@ -255,9 +256,10 @@ const View = {
   },
 
   updatePreview(rgb) {
-    const hex = `#${((1 << 24) + (rgb.r << 16) + (rgb.g << 8) + rgb.b).toString(16).slice(1)}`;
+    const hex = `#${((1 << 24) + (rgb.r << 16) + (rgb.g << 8) + rgb.b).toString(16).slice(1).toUpperCase()}`;
     this.elements.colorPreview.style.backgroundColor = hex;
-    this.elements.nativePicker.value = hex;
+    this.elements.nativePicker.value = hex.toLowerCase();
+    this.elements.hexValue.textContent = hex;
   },
 
   setWarning(show) {
@@ -418,31 +420,25 @@ const Tests = {
       log.push((condition ? "✅ PASS: " : "❌ FAIL: ") + msg);
     };
 
-    // Test 1: RGB(255, 0, 0) -> LAB (D65)
     const labRed = Model.rgbToLab(255, 0, 0, 'D65');
     assert(Math.abs(labRed.L - 53) <= 2 && Math.abs(labRed.a - 80) <= 2 && Math.abs(labRed.b - 67) <= 2, 
       `RGB(255,0,0) -> LAB D65 expected L~53 a~80 b~67, got L:${labRed.L} a:${labRed.a} b:${labRed.b}`);
 
-    // Test 2: RGB(255, 0, 0) -> CMYK (GCR)
     const cmykRedGCR = Model.rgbToCmyk(255, 0, 0, 'GCR');
     assert(cmykRedGCR.c === 0 && cmykRedGCR.m === 100 && cmykRedGCR.y === 100 && cmykRedGCR.k === 0, 
       `RGB(255,0,0) -> CMYK GCR expected C:0 M:100 Y:100 K:0, got C:${cmykRedGCR.c} M:${cmykRedGCR.m} Y:${cmykRedGCR.y} K:${cmykRedGCR.k}`);
 
-    // Test 3: RGB(0, 0, 0) -> CMYK (UCR vs GCR)
     const cmykBlackUCR = Model.rgbToCmyk(0, 0, 0, 'UCR');
     assert(cmykBlackUCR.k === 50, `RGB(0,0,0) -> CMYK UCR expected K:50, got K:${cmykBlackUCR.k}`);
 
-    // Test 4: Dynamic Matrix generation for D50
     const matsD50 = Model.getMatrices('D50');
     assert(Math.abs(matsD50.W.X - 96.43) < 0.1 && Math.abs(matsD50.W.Z - 82.51) < 0.1, 
       `D50 White Point expected X~96.43 Z~82.51, got X:${matsD50.W.X.toFixed(2)} Z:${matsD50.W.Z.toFixed(2)}`);
 
-    // Test 5: Gamut Clipping
     const clipped = Model.handleGamut(300, -20, 150, 'clipping');
     assert(clipped.r === 255 && clipped.g === 0 && clipped.b === 150 && clipped.outOfGamut, 
       `Clipping (300, -20, 150) expected (255, 0, 150) flag:true, got (${clipped.r}, ${clipped.g}, ${clipped.b}) flag:${clipped.outOfGamut}`);
 
-    // Test 6: Gamut Scaling
     const scaled = Model.handleGamut(300, 0, 0, 'scaling');
     assert(scaled.r === 255 && scaled.g === 0 && scaled.b === 0 && scaled.outOfGamut, 
       `Scaling (300, 0, 0) expected (255, 0, 0) flag:true, got (${scaled.r}, ${scaled.g}, ${scaled.b}) flag:${scaled.outOfGamut}`);
