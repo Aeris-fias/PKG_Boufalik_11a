@@ -2,12 +2,22 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <title>Color Converter - MVC</title>
+  <title>Color Converter - Direct Conversion</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="container">
     <h1>Color Converter</h1>
+
+    <div class="main-preview-card" id="colorPreview">
+      <div class="preview-overlay">
+        <label for="nativePicker" class="picker-btn">
+          <span>Выбрать цвет</span>
+          <input type="color" id="nativePicker" value="#ff0000">
+        </label>
+        <span id="hexValue" class="hex-text">#FF0000</span>
+      </div>
+    </div>
 
     <div class="top-panel">
       <div class="control-card">
@@ -33,12 +43,6 @@
           <option value="clipping" selected>Clipping</option>
           <option value="scaling">Scaling</option>
         </select>
-      </div>
-
-      <div class="control-card picker-box">
-        <label for="nativePicker">Picker:</label>
-        <input type="color" id="nativePicker" value="#ff0000">
-        <div id="colorPreview" class="preview"></div>
       </div>
     </div>
 
@@ -101,7 +105,7 @@
     </div>
 
     <div class="tests-card">
-      <h2>Automated Unit Tests</h2>
+      <h2>Automated Unit Tests (Direct Conversions)</h2>
       <button id="runTestsBtn">Run Tests</button>
       <div id="testResults" class="test-results"></div>
     </div>
