@@ -55,7 +55,10 @@ const Model = {
     return [Math.min(255, Math.max(0, c1)), Math.min(255, Math.max(0, c2)), Math.min(255, Math.max(0, c3)), outOfGamut];
   },
   _hex(c1, c2, c3) {
-    return `#${((1<<24)+(Math.round(c1)<<16)+(Math.round(c2)<<8)+Math.round(c3)).toString(16).slice(1).toUpperCase()}`;
+    let r = Math.round(c1) || 0;
+    let g = Math.round(c2) || 0;
+    let b = Math.round(c3) || 0;
+    return `#${((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1).toUpperCase()}`;
   },
 
   cmykToHsv(c, m, y, k) {
@@ -203,16 +206,20 @@ const View = {
     else this.elements.warning.classList.add('hidden');
   },
   updateSliderGradients(state, illuminant, cmykMode, gamutStrategy) {
+    // Отрисовка градиентов для CMYK
     ['C', 'M', 'Y', 'K'].forEach(k => {
       let vals = { C: state.CMYK.c, M: state.CMYK.m, Y: state.CMYK.y, K: state.CMYK.k };
       const getHex = v => { vals[k] = v; return Model.cmykToHex(vals.C, vals.M, vals.Y, vals.K); };
       document.getElementById(`range${k}`).style.background = `linear-gradient(to right, ${getHex(0)}, ${getHex(100)})`;
     });
-    const {l, a, b} = state.LAB;
+    
+    // Отрисовка градиентов для LAB (Теперь используется большая буква L)
+    const {L, a, b} = state.LAB;
     document.getElementById('rangeL').style.background = `linear-gradient(to right, ${Model.labToHex(0, a, b, illuminant, gamutStrategy)}, ${Model.labToHex(100, a, b, illuminant, gamutStrategy)})`;
-    document.getElementById('rangeA').style.background = `linear-gradient(to right, ${Model.labToHex(l, -128, b, illuminant, gamutStrategy)}, ${Model.labToHex(l, 127, b, illuminant, gamutStrategy)})`;
-    document.getElementById('rangeB').style.background = `linear-gradient(to right, ${Model.labToHex(l, a, -128, illuminant, gamutStrategy)}, ${Model.labToHex(l, a, 127, illuminant, gamutStrategy)})`;
+    document.getElementById('rangeA').style.background = `linear-gradient(to right, ${Model.labToHex(L, -128, b, illuminant, gamutStrategy)}, ${Model.labToHex(L, 127, b, illuminant, gamutStrategy)})`;
+    document.getElementById('rangeB').style.background = `linear-gradient(to right, ${Model.labToHex(L, a, -128, illuminant, gamutStrategy)}, ${Model.labToHex(L, a, 127, illuminant, gamutStrategy)})`;
 
+    // Отрисовка градиентов для HSV
     const {h, s, v} = state.HSV;
     document.getElementById('rangeH').style.background = `linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000)`;
     document.getElementById('rangeS').style.background = `linear-gradient(to right, ${Model.hsvToHex(h, 0, v)}, ${Model.hsvToHex(h, 100, v)})`;
