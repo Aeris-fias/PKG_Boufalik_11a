@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Лабораторная работа №3 — Обработка цифровых изображений</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-badge">ЛР3</div>
+      <div>
+        <h1>Обработка цифровых изображений</h1>
+        <p>Вариант 5 + Полный пакет усложнений (Группа 10А) • 3-слойная архитектура • Web Workers</p>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <div class="status-pill" id="threadInfo">Потоки: 4</div>
+      <div class="status-pill" id="perfInfo">Время: 0.0 мс</div>
+      <label class="btn btn-primary" for="fileInput">Загрузить своё фото</label>
+      <input type="file" id="fileInput" accept="image/*" hidden>
+      <button class="btn btn-secondary" id="downloadBtn">Скачать результат</button>
+    </div>
+  </header>
+
+  <div class="progress-Wrap" id="progressWrap">
+    <div class="progress-bar" id="progressBar"></div>
+  </div>
+
+  <main class="workspace">
+    <aside class="sidebar">
+      <section class="panel">
+        <h2>1. База тестовых изображений</h2>
+        <div class="preset-grid" id="presetGrid">
+          <button class="preset-btn active" data-preset="lowContrast">Малоконтрастное (Гистограммы / CLAHE)</button>
+          <button class="preset-btn" data-preset="saltPepper">Шум «Соль и перец» (Вариант 5: Медиана)</button>
+          <button class="preset-btn" data-preset="unevenText">Текст с тенью (Оцу vs Саувола / SAT)</button>
+          <button class="preset-btn" data-preset="edgesShapes">Фигуры и углы (Собель / Кэнни)</button>
+          <button class="preset-btn" data-preset="morphology">Детали на фоне (Top-Hat / Градиент)</button>
+          <button class="preset-btn" data-preset="colorCast">Цветные сферы (RGB vs HSV эквализация)</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>2. Стратегия обработки краев и потоки</h2>
+        <div class="control-group">
+          <label for="paddingSelect">Edge Padding (Обработка границ):</label>
+          <select id="paddingSelect">
+            <option value="reflect">Reflect (Зеркальное отражение)</option>
+            <option value="clamp">Clamp (Дублирование граничных пикселей)</option>
+          </select>
+        </div>
+        <div class="control-group checkbox-row">
+          <label>
+            <input type="checkbox" id="useWorkersCheck" checked>
+            Многопоточная обработка (Web Workers)
+          </label>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>3. Категория и алгоритм</h2>
+        <div class="tabs" id="categoryTabs">
+          <button class="tab-btn active" data-cat="hist">Гистограммы и Контраст (Вар. 5)</button>
+          <button class="tab-btn" data-cat="order">Порядковые статистики (Вар. 5)</button>
+          <button class="tab-btn" data-cat="conv">НЧ / ВЧ Свертки (1D+1D)</button>
+          <button class="tab-btn" data-cat="seg">Сегментация / Кэнни</button>
+          <button class="tab-btn" data-cat="thresh">Пороги (Оцу / SAT)</button>
+          <button class="tab-btn" data-cat="morph">Морфология</button>
+        </div>
+
+        <div class="control-group">
+          <label for="methodSelect">Выбранный метод:</label>
+          <select id="methodSelect"></select>
+        </div>
+
+        <div id="dynamicControls" class="dynamic-controls"></div>
+
+        <div class="action-row">
+          <button class="btn btn-accent full-width" id="applyBtn">Выполнить обработку</button>
+          <button class="btn btn-secondary" id="useResultAsSourceBtn" title="Скопировать результат в исходное изображение для цепочки фильтров">Результат → В исходник</button>
+          <button class="btn btn-secondary" id="resetBtn">Сброс</button>
+        </div>
+      </section>
+    </aside>
+
+    <section class="content-area">
+      <div class="canvases-grid">
+        <div class="canvas-card">
+          <div class="card-header">
+            <span>Исходное изображение («До»)</span>
+            <span class="meta-tag" id="srcMeta">0 × 0 px</span>
+          </div>
+          <div class="canvas-viewport">
+            <canvas id="srcCanvas"></canvas>
+          </div>
+          <div class="stats-bar" id="srcStats"></div>
+        </div>
+
+        <div class="canvas-card">
+          <div class="card-header">
+            <span>Результат обработки («После»)</span>
+            <span class="meta-tag" id="dstMeta">Метод не применен</span>
+          </div>
+          <div class="canvas-viewport">
+            <canvas id="dstCanvas"></canvas>
+          </div>
+          <div class="stats-bar" id="dstStats"></div>
+        </div>
+      </div>
+
+      <div class="histograms-grid">
+        <div class="canvas-card">
+          <div class="card-header">
+            <span>Гистограмма «До» (R, G, B и яркость Luma)</span>
+            <span class="meta-tag" id="srcEntropy">H = 0.00 бит</span>
+          </div>
+          <canvas id="srcHistCanvas" width="512" height="170" class="hist-canvas"></canvas>
+        </div>
+
+        <div class="canvas-card">
+          <div class="card-header">
+            <span>Гистограмма «После» (R, G, B и яркость Luma)</span>
+            <span class="meta-tag" id="dstEntropy">H = 0.00 бит</span>
+          </div>
+          <canvas id="dstHistCanvas" width="512" height="170" class="hist-canvas"></canvas>
+        </div>
+      </div>
+
+      <div class="canvas-card report-card">
+        <div class="card-header">
+          <span>Аналитический отчет и пояснения к методу</span>
+          <span class="meta-tag" id="complexityTag">Сложность: O(N)</span>
+        </div>
+        <div class="report-body" id="reportBody"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="buffer.js"></script>
+  <script src="algorithms.js"></script>
+  <script src="ui.js"></script>
+</body>
+</html>
