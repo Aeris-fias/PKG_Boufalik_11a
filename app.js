@@ -17,11 +17,14 @@ self.onmessage = async function(e) {
         index: batchStartIndex + i + 1,
         fileName: file.name,
         fileSize: file.size,
-        detectedFormat: 'Неизвестно',
+        detectedFormat: 'UNKNOWN',
         dimensions: '—',
+        pixels: 0,
         dpi: '—',
         bitDepth: '—',
+        bitDepthNum: 0,
         compression: '—',
+        magicHex: '—',
         status: 'corrupted',
         statusText: 'Ошибка чтения: ' + (err.message || 'Файл поврежден'),
         extra: {}
@@ -31,7 +34,6 @@ self.onmessage = async function(e) {
   self.postMessage({ results });
 };
 
-// Ленивое чтение среза файла (не грузит весь файл в память!)
 async function readSlice(file, offset, length) {
   const safeOffset = Math.max(0, offset);
   const safeEnd = Math.min(file.size, safeOffset + length);
@@ -46,6 +48,15 @@ function getExtension(name) {
   return idx !== -1 ? name.slice(idx + 1).toLowerCase() : '';
 }
 
+function toHexString(view, count) {
+  const bytes = [];
+  const limit = Math.min(view.byteLength, count);
+  for (let i = 0; i < limit; i++) {
+    bytes.push(view.getUint8(i).toString(16).toUpperCase().padStart(2, '0'));
+  }
+  return bytes.join(' ');
+}
+
 async function parseImageFile(file) {
   const ext = getExtension(file.name);
   const baseResult = {
@@ -54,9 +65,12 @@ async function parseImageFile(file) {
     ext: ext,
     detectedFormat: 'UNKNOWN',
     dimensions: '—',
+    pixels: 0,
     dpi: '—',
     bitDepth: '—',
+    bitDepthNum: 0,
     compression: '—',
+    magicHex: '—',
     status: 'ok',
     statusText: 'OK (Валиден)',
     extra: {}
@@ -68,14 +82,14 @@ async function parseImageFile(file) {
     return baseResult;
   }
 
-  // Читаем первые 64 КБ заголовка (достаточно для BMP, PNG, GIF, PCX и большинства маркеров)
   const headerView = await readSlice(file, 0, 65536);
+  baseResult.magicHex = toHexString(headerView, 16);
+
   const b0 = headerView.getUint8(0);
   const b1 = headerView.getUint8(1);
   const b2 = headerView.getUint8(2);
   const b3 = headerView.getUint8(3);
 
-  // Определяем реальный формат по Magic Numbers (сигнатуре байтов)
   if (b0 === 0x89 && b1 === 0x50 && b2 === 0x4E && b3 === 0x47) {
     baseResult.detectedFormat = 'PNG';
     await parsePNG(file, headerView, baseResult);
@@ -97,11 +111,10 @@ async function parseImageFile(file) {
     await parsePCX(file, headerView, baseResult);
   } else {
     baseResult.status = 'corrupted';
-    baseResult.statusText = 'Неизвестная сигнатура (файл поврежден или не является изображением)';
+    baseResult.statusText = 'Неизвестная сигнатура (файл поврежден или не изображение)';
     return baseResult;
   }
 
-  // Проверка на подмену расширения (например, текстовый или PNG файл переименован в .jpg)
   const extMap = {
     'jpg': 'JPEG', 'jpeg': 'JPEG',
     'png': 'PNG',
@@ -112,15 +125,13 @@ async function parseImageFile(file) {
   };
   if (baseResult.status === 'ok' && extMap[ext] && extMap[ext] !== baseResult.detectedFormat) {
     baseResult.status = 'mismatch';
-    baseResult.statusText = \`Подмена расширения: указан .\${ext}, внутри \${baseResult.detectedFormat}\`;
+    baseResult.statusText = \`Подмена: .\${ext} → внутри \${baseResult.detectedFormat}\`;
   }
 
   return baseResult;
 }
 
-// ----------------------------------------------------------------------------
-// 1. РУЧНОЙ ПАРСИНГ BMP (BITMAPFILEHEADER + BITMAPINFOHEADER)
-// ----------------------------------------------------------------------------
+// 1. BMP
 async function parseBMP(file, view, res) {
   if (view.byteLength < 54) {
     res.status = 'corrupted';
@@ -135,13 +146,11 @@ async function parseBMP(file, view, res) {
   let xPelsPerMeter = 0, yPelsPerMeter = 0, clrUsed = 0;
 
   if (biSize === 12) {
-    // BITMAPCOREHEADER (OS/2)
     width = view.getUint16(18, true);
     height = view.getUint16(20, true);
     planes = view.getUint16(22, true);
     bitCount = view.getUint16(24, true);
   } else {
-    // BITMAPINFOHEADER (40 байт и выше)
     width = view.getInt32(18, true);
     height = Math.abs(view.getInt32(22, true));
     planes = view.getUint16(26, true);
@@ -165,11 +174,12 @@ async function parseBMP(file, view, res) {
   const dpiY = yPelsPerMeter > 0 ? Math.round(yPelsPerMeter * 0.0254) : 96;
 
   res.dimensions = \`\${width} × \${height}\`;
+  res.pixels = width * height;
   res.dpi = \`\${dpiX} × \${dpiY}\`;
   res.bitDepth = \`\${bitCount} бит\`;
+  res.bitDepthNum = bitCount;
   res.compression = compMap[compressionCode] || \`Код \${compressionCode}\`;
 
-  // Расчет палитры BMP
   let paletteEntries = 0;
   if (bitCount <= 8 && bitCount > 0) {
     paletteEntries = clrUsed > 0 ? clrUsed : (1 << bitCount);
@@ -179,38 +189,33 @@ async function parseBMP(file, view, res) {
     'Сигнатура (Magic Number)': '42 4D ("BM")',
     'Размер заголовка DIB (biSize)': \`\${biSize} байт\`,
     'Смещение растра (bfOffBits)': \`\${dataOffset} байт\`,
-    'Заявленный размер в заголовке': \`\${declaredFileSize} байт (фактический: \${file.size})\`,
+    'Заявленный размер файла': \`\${declaredFileSize} Б (факт: \${file.size} Б)\`,
     'Цветовых плоскостей (biPlanes)': planes,
     'Устройство палитры BMP': paletteEntries > 0
-      ? \`Используется таблица цветов RGBQUAD (\${paletteEntries} цветов по 4 байта: Blue, Green, Red, Reserved)\`
+      ? \`Таблица цветов RGBQUAD (\${paletteEntries} цв. по 4 байта: B, G, R, 0)\`
       : 'Прямое кодирование цвета без палитры (TrueColor)'
   };
 
-  // Валидация целостности BMP
   if (width <= 0 || height <= 0 || file.size < dataOffset || (declaredFileSize > file.size && compressionCode === 0)) {
     res.status = 'corrupted';
-    res.statusText = \`Файл поврежден: фактический размер (\${file.size} Б) меньше заявленного в BITMAPFILEHEADER (\${declaredFileSize} Б)\`;
+    res.statusText = \`Файл поврежден: размер (\${file.size} Б) меньше заголовка (\${declaredFileSize} Б)\`;
   }
 }
 
-// ----------------------------------------------------------------------------
-// 2. РУЧНОЙ ПАРСИНГ PNG (Сигнатура + IHDR + pHYs + PLTE + проверка IEND)
-// ----------------------------------------------------------------------------
+// 2. PNG
 async function parsePNG(file, view, res) {
-  // Проверка сигнатуры 89 50 4E 47 0D 0A 1A 0A
   if (view.byteLength < 33 || view.getUint32(4, false) !== 0x0D0A1A0A) {
     res.status = 'corrupted';
     res.statusText = 'Файл поврежден (нарушена 8-байтовая сигнатура PNG)';
     return;
   }
 
-  // Первый чанк обязан быть IHDR (смещение 8)
   const ihdrType = String.fromCharCode(
     view.getUint8(12), view.getUint8(13), view.getUint8(14), view.getUint8(15)
   );
   if (ihdrType !== 'IHDR') {
     res.status = 'corrupted';
-    res.statusText = 'Файл поврежден (отсутствует обязательный первый чанк IHDR)';
+    res.statusText = 'Файл поврежден (нет обязательного чанка IHDR)';
     return;
   }
 
@@ -234,10 +239,9 @@ async function parsePNG(file, view, res) {
   const channels = channelsMap[colorType] || 1;
   const totalBitDepth = bitDepthPerChannel * channels;
 
-  let dpiX = 72, dpiY = 72, dpiNote = '72 × 72 (по умолчанию, чанк pHYs отсутствует)';
+  let dpiX = 72, dpiY = 72, dpiNote = '72 × 72 (по умолч.)';
   let paletteColors = 0;
 
-  // Сканируем чанки в пределах загруженного среза для поиска pHYs и PLTE
   let offset = 8;
   while (offset + 8 <= view.byteLength) {
     const chunkLen = view.getUint32(offset, false);
@@ -252,7 +256,7 @@ async function parsePNG(file, view, res) {
       const ppuX = view.getUint32(offset + 8, false);
       const ppuY = view.getUint32(offset + 12, false);
       const unit = view.getUint8(offset + 16);
-      if (unit === 1) { // метр
+      if (unit === 1) {
         dpiX = Math.round(ppuX * 0.0254);
         dpiY = Math.round(ppuY * 0.0254);
         dpiNote = \`\${dpiX} × \${dpiY}\`;
@@ -266,19 +270,20 @@ async function parsePNG(file, view, res) {
   }
 
   res.dimensions = \`\${width} × \${height}\`;
+  res.pixels = width * height;
   res.dpi = dpiNote;
-  res.bitDepth = \`\${totalBitDepth} бит (\${bitDepthPerChannel} бит/канал)\`;
-  res.compression = compressionMethod === 0 ? 'Deflate (LZ77 + Хаффман)' : \`Неизвестный (\${compressionMethod})\`;
+  res.bitDepth = \`\${totalBitDepth} бит (\${bitDepthPerChannel} бит/кан.)\`;
+  res.bitDepthNum = totalBitDepth;
+  res.compression = compressionMethod === 0 ? 'Deflate (LZ77 + Хаффман)' : \`Код \${compressionMethod}\`;
 
   res.extra = {
     'Сигнатура PNG': '89 50 4E 47 0D 0A 1A 0A',
     'Тип цвета (Color Type)': colorTypeDesc[colorType] || colorType,
-    'Метод фильтрации (Filter Method)': filterMethod === 0 ? '0 (Адаптивная фильтрация: None, Sub, Up, Average, Paeth)' : filterMethod,
-    'Чересстрочная развертка (Interlace)': interlaceMethod === 1 ? 'Adam7 (7 проходов)' : '0 (Без развертки)',
+    'Метод фильтрации (Filter)': filterMethod === 0 ? '0 (Адаптивная: None, Sub, Up, Average, Paeth)' : filterMethod,
+    'Чересстрочная развертка': interlaceMethod === 1 ? 'Adam7 (7 проходов)' : '0 (Без развертки)',
     'Цветов в палитре (PLTE)': paletteColors > 0 ? paletteColors : 'Не используется'
   };
 
-  // Проверка хвоста файла на наличие закрывающего чанка IEND (последние 12 байт)
   const tailView = await readSlice(file, file.size - 12, 12);
   let hasIEND = false;
   if (tailView.byteLength === 12) {
@@ -290,13 +295,11 @@ async function parsePNG(file, view, res) {
 
   if (!hasIEND || width === 0 || height === 0) {
     res.status = 'corrupted';
-    res.statusText = 'Файл поврежден: в конце файла отсутствует закрывающий чанк IEND';
+    res.statusText = 'Файл поврежден: отсутствует закрывающий чанк IEND';
   }
 }
 
-// ----------------------------------------------------------------------------
-// 3. РУЧНОЙ ПАРСИНГ GIF (Logical Screen Descriptor + Палитра + Трейлер 0x3B)
-// ----------------------------------------------------------------------------
+// 3. GIF
 async function parseGIF(file, view, res) {
   if (view.byteLength < 13) {
     res.status = 'corrupted';
@@ -320,33 +323,32 @@ async function parseGIF(file, view, res) {
   const paletteColorsCount = gctFlag ? (1 << gctSizePower) : 0;
 
   res.dimensions = \`\${width} × \${height}\`;
-  res.dpi = '72 × 72 (не хранится в GIF)';
-  res.bitDepth = \`\${gctSizePower} бит (палитра до \${paletteColorsCount} цв.)\`;
+  res.pixels = width * height;
+  res.dpi = '72 × 72 (не хранится)';
+  res.bitDepth = \`\${gctSizePower} бит (\${paletteColorsCount} цв.)\`;
+  res.bitDepthNum = gctSizePower;
   res.compression = 'LZW (Lempel-Ziv-Welch)';
 
   res.extra = {
     'Версия спецификации': version,
-    'Глобальная палитра (GCT)': gctFlag ? \`Да (\${paletteColorsCount} цветов, \${paletteColorsCount * 3} байт RGB)\` : 'Нет (используется локальная палитра)',
-    'Разрешение цвета источника': \`\${colorResolution} бит на первичный цвет\`,
+    'Глобальная палитра (GCT)': gctFlag ? \`Да (\${paletteColorsCount} цветов, \${paletteColorsCount * 3} байт RGB)\` : 'Нет (локальная)',
+    'Разрешение цвета источника': \`\${colorResolution} бит на канал\`,
     'Индекс цвета фона': bgColorIndex,
-    'Соотношение сторон пикселя': aspectRatioByte === 0 ? '1:1 (квадратный пиксель)' : ((aspectRatioByte + 15) / 64).toFixed(2)
+    'Соотношение сторон пикселя': aspectRatioByte === 0 ? '1:1 (квадратный)' : ((aspectRatioByte + 15) / 64).toFixed(2)
   };
 
-  // Проверка последнего байта GIF — обязан быть трейлер 0x3B (';')
   const tailView = await readSlice(file, file.size - 1, 1);
   if (tailView.byteLength < 1 || tailView.getUint8(0) !== 0x3B || width === 0 || height === 0) {
     res.status = 'corrupted';
-    res.statusText = 'Файл поврежден: отсутствует завершающий байт-трейлер GIF (0x3B)';
+    res.statusText = 'Файл поврежден: отсутствует трейлер GIF (0x3B)';
   }
 }
 
-// ----------------------------------------------------------------------------
-// 4. РУЧНОЙ ПАРСИНГ PCX (128-байтный заголовок ZSoft + 256-цветная палитра в хвосте)
-// ----------------------------------------------------------------------------
+// 4. PCX
 async function parsePCX(file, view, res) {
   if (file.size < 128 || view.byteLength < 128) {
     res.status = 'corrupted';
-    res.statusText = 'Файл поврежден (размер меньше 128-байтного заголовка PCX)';
+    res.statusText = 'Файл поврежден (размер < 128 байт PCX)';
     return;
   }
 
@@ -368,54 +370,52 @@ async function parsePCX(file, view, res) {
 
   if (width <= 0 || height <= 0 || bitsPerPlane === 0 || numPlanes === 0) {
     res.status = 'corrupted';
-    res.statusText = 'Файл поврежден (некорректная геометрия в заголовке PCX)';
+    res.statusText = 'Файл поврежден (некорректная геометрия PCX)';
     return;
   }
 
-  // Проверка наличия расширенной 256-цветной VGA палитры (за 769 байт до конца файла стоит маркер 0x0C)
-  let paletteInfo = '16 цветов EGA в заголовке (48 байт по смещению 16)';
+  let paletteInfo = '16 цветов EGA в заголовке (48 байт)';
   if (totalBitDepth === 8 && file.size > 128 + 769) {
     const palView = await readSlice(file, file.size - 769, 1);
     if (palView.byteLength === 1 && palView.getUint8(0) === 0x0C) {
-      paletteInfo = '256 цветов VGA (768 байт в конце файла после маркера 0x0C)';
+      paletteInfo = '256 цветов VGA (768 байт в конце после 0x0C)';
     }
   } else if (totalBitDepth === 24) {
     paletteInfo = 'Без палитры (3 плоскости R, G, B по 8 бит)';
   }
 
   res.dimensions = \`\${width} × \${height}\`;
+  res.pixels = width * height;
   res.dpi = \`\${hDpi || 72} × \${vDpi || 72}\`;
-  res.bitDepth = \`\${totalBitDepth} бит (\${bitsPerPlane} бит × \${numPlanes} плоск.)\`;
+  res.bitDepth = \`\${totalBitDepth} бит (\${bitsPerPlane}×\${numPlanes})\`;
+  res.bitDepthNum = totalBitDepth;
   res.compression = encoding === 1 ? 'RLE (Run-Length Encoding)' : 'Без сжатия';
 
   res.extra = {
     'Производитель (Байт 0)': '0x0A (ZSoft .PCX)',
     'Версия PCX': version,
-    'Байт на строку плоскости (BytesPerLine)': bytesPerLine,
+    'Байт на строку (BytesPerLine)': bytesPerLine,
     'Организация палитры': paletteInfo
   };
 }
 
-// ----------------------------------------------------------------------------
-// 5. РУЧНОЙ ПАРСИНГ JPEG (Маркеры JFIF/Exif, DQT матрица квантования, SOFn, EOI FF D9)
-// ----------------------------------------------------------------------------
+// 5. JPEG
 async function parseJPEG(file, view, res) {
-  let offset = 2; // Пропускаем FF D8 (SOI)
+  let offset = 2;
   let width = 0, height = 0, bitDepth = 0, compressionName = 'Baseline DCT (Хаффман)';
-  let dpiX = 72, dpiY = 72, dpiSource = 'По умолчанию (72 × 72)';
+  let dpiX = 72, dpiY = 72, dpiSource = '72 × 72 (по умолч.)';
   const quantTables = [];
 
   const sofMap = {
     0xC0: 'Baseline DCT (Хаффман)',
-    0xC1: 'Extended Sequential DCT (Хаффман)',
+    0xC1: 'Extended Sequential DCT',
     0xC2: 'Progressive DCT (Хаффман)',
     0xC3: 'Lossless (Хаффман)',
-    0xC9: 'Extended Sequential DCT (Арифметическое)',
-    0xCA: 'Progressive DCT (Арифметическое)'
+    0xC9: 'Extended DCT (Арифм.)',
+    0xCA: 'Progressive DCT (Арифм.)'
   };
 
   while (offset < file.size) {
-    // Если вышли за пределы текущего буфера, подгружаем следующий кусок по смещению
     let chunkView = await readSlice(file, offset, 65536);
     if (chunkView.byteLength < 4) break;
 
@@ -424,7 +424,6 @@ async function parseJPEG(file, view, res) {
       continue;
     }
 
-    // Пропускаем возможные байты-заполнители 0xFF
     let markerPos = 1;
     while (markerPos < chunkView.byteLength && chunkView.getUint8(markerPos) === 0xFF) {
       markerPos++;
@@ -434,16 +433,12 @@ async function parseJPEG(file, view, res) {
     const marker = chunkView.getUint8(markerPos);
     offset += markerPos + 1;
 
-    // Маркеры без длины (SOI, EOI, RSTn)
     if (marker === 0xD8 || marker === 0xD9 || (marker >= 0xD0 && marker <= 0xD7) || marker === 0x01) {
       if (marker === 0xD9) break;
       continue;
     }
 
-    // Если старт потока сжатых данных SOS (0xDA) и мы уже нашли геом. размеры — выходим из цикла
-    if (marker === 0xDA && width > 0) {
-      break;
-    }
+    if (marker === 0xDA && width > 0) break;
 
     const segHeader = await readSlice(file, offset, 2);
     if (segHeader.byteLength < 2) break;
@@ -452,7 +447,6 @@ async function parseJPEG(file, view, res) {
 
     const segData = await readSlice(file, offset + 2, Math.min(segLength - 2, 16384));
 
-    // APP0 (JFIF) — достаем разрешение DPI
     if (marker === 0xE0 && segData.byteLength >= 12) {
       const id = String.fromCharCode(
         segData.getUint8(0), segData.getUint8(1), segData.getUint8(2), segData.getUint8(3)
@@ -461,18 +455,17 @@ async function parseJPEG(file, view, res) {
         const units = segData.getUint8(7);
         const xDens = segData.getUint16(8, false);
         const yDens = segData.getUint16(10, false);
-        if (units === 1) { // точек на дюйм
+        if (units === 1) {
           dpiX = xDens; dpiY = yDens;
-          dpiSource = \`\${dpiX} × \${dpiY} (из JFIF APP0)\`;
-        } else if (units === 2) { // точек на см
+          dpiSource = \`\${dpiX} × \${dpiY} (JFIF)\`;
+        } else if (units === 2) {
           dpiX = Math.round(xDens * 2.54);
           dpiY = Math.round(yDens * 2.54);
-          dpiSource = \`\${dpiX} × \${dpiY} (пересчитано из JFIF точек/см)\`;
+          dpiSource = \`\${dpiX} × \${dpiY} (из точек/см)\`;
         }
       }
     }
 
-    // DQT (0xDB) — Таблица (матрица) квантования JPEG (на доп. баллы!)
     if (marker === 0xDB && segData.byteLength >= 65) {
       let qOffset = 0;
       while (qOffset + 65 <= segData.byteLength) {
@@ -493,7 +486,6 @@ async function parseJPEG(file, view, res) {
       }
     }
 
-    // SOFn (Start of Frame) — геометрия и глубина цвета
     if (sofMap[marker] && segData.byteLength >= 6) {
       compressionName = sofMap[marker];
       const precision = segData.getUint8(0);
@@ -507,18 +499,19 @@ async function parseJPEG(file, view, res) {
   }
 
   res.dimensions = width > 0 ? \`\${width} × \${height}\` : 'Не найдено';
+  res.pixels = width * height;
   res.dpi = dpiSource;
   res.bitDepth = bitDepth > 0 ? \`\${bitDepth} бит\` : '24 бит';
+  res.bitDepthNum = bitDepth || 24;
   res.compression = \`JPEG (\${compressionName})\`;
 
   res.extra = {
     'Сигнатура старта (SOI)': 'FF D8',
     'Алгоритм кодирования (SOFn)': compressionName,
-    'Найдено матриц квантования (DQT, маркер FF DB)': quantTables.length,
+    'Матриц квантования (DQT FF DB)': quantTables.length,
     'quantTables': quantTables
   };
 
-  // Проверка конца файла на маркер EOI (FF D9) — ищем в последних 64 байтах (на случай выравнивания нулями/пробелами)
   const tailView = await readSlice(file, Math.max(0, file.size - 64), 64);
   let hasEOI = false;
   for (let i = tailView.byteLength - 2; i >= 0; i--) {
@@ -531,28 +524,26 @@ async function parseJPEG(file, view, res) {
   if (!hasEOI || width === 0 || height === 0) {
     res.status = 'corrupted';
     res.statusText = width === 0
-      ? 'Файл поврежден (отсутствует маркер кадра SOFn)'
-      : 'Файл поврежден: в конце файла отсутствует маркер конца изображения EOI (FF D9)';
+      ? 'Файл поврежден (нет маркера геометрии SOFn)'
+      : 'Файл поврежден: в конце нет маркера EOI (FF D9)';
   }
 }
 
-// ----------------------------------------------------------------------------
-// 6. РУЧНОЙ ПАРСИНГ TIFF (Порядок байтов II/MM + парсинг каталога тегов IFD)
-// ----------------------------------------------------------------------------
+// 6. TIFF
 async function parseTIFF(file, view, res) {
-  const littleEndian = view.getUint8(0) === 0x49; // 'II' = Little-Endian, 'MM' = Big-Endian
+  const littleEndian = view.getUint8(0) === 0x49;
   const ifdOffset = view.getUint32(4, littleEndian);
 
   if (ifdOffset === 0 || ifdOffset + 2 > file.size) {
     res.status = 'corrupted';
-    res.statusText = \`Файл поврежден: смещение каталога IFD (\${ifdOffset}) выходит за пределы файла\`;
+    res.statusText = \`Файл поврежден: смещение IFD (\${ifdOffset}) вне файла\`;
     return;
   }
 
   const ifdView = await readSlice(file, ifdOffset, 4096);
   if (ifdView.byteLength < 2) {
     res.status = 'corrupted';
-    res.statusText = 'Файл поврежден (не удалось прочитать каталог тегов IFD)';
+    res.statusText = 'Файл поврежден (не удалось прочитать каталог IFD)';
     return;
   }
 
@@ -576,26 +567,24 @@ async function parseTIFF(file, view, res) {
     const valOffsetPos = entryPos + 8;
 
     const readScalar = () => {
-      if (type === 3) return ifdView.getUint16(valOffsetPos, littleEndian); // SHORT
-      if (type === 4) return ifdView.getUint32(valOffsetPos, littleEndian); // LONG
+      if (type === 3) return ifdView.getUint16(valOffsetPos, littleEndian);
+      if (type === 4) return ifdView.getUint32(valOffsetPos, littleEndian);
       return ifdView.getUint16(valOffsetPos, littleEndian);
     };
 
-    if (tag === 256) width = readScalar(); // ImageWidth
-    else if (tag === 257) height = readScalar(); // ImageLength
-    else if (tag === 258) { // BitsPerSample
+    if (tag === 256) width = readScalar();
+    else if (tag === 257) height = readScalar();
+    else if (tag === 258) {
       if (count === 1) {
         bitsPerSample = readScalar();
       } else {
         const ptr = ifdView.getUint32(valOffsetPos, littleEndian);
         const bpsView = await readSlice(file, ptr, count * 2);
-        if (bpsView.byteLength >= 2) {
-          bitsPerSample = bpsView.getUint16(0, littleEndian);
-        }
+        if (bpsView.byteLength >= 2) bitsPerSample = bpsView.getUint16(0, littleEndian);
       }
-    } else if (tag === 259) compression = readScalar(); // Compression
-    else if (tag === 277) samplesPerPixel = readScalar(); // SamplesPerPixel
-    else if (tag === 282 || tag === 283) { // XResolution / YResolution (RATIONAL = два 32-бит числа)
+    } else if (tag === 259) compression = readScalar();
+    else if (tag === 277) samplesPerPixel = readScalar();
+    else if (tag === 282 || tag === 283) {
       const ratOffset = ifdView.getUint32(valOffsetPos, littleEndian);
       const ratView = await readSlice(file, ratOffset, 8);
       if (ratView.byteLength === 8) {
@@ -605,10 +594,10 @@ async function parseTIFF(file, view, res) {
         if (tag === 282) xRes = val;
         if (tag === 283) yRes = val;
       }
-    } else if (tag === 296) resUnit = readScalar(); // ResolutionUnit
+    } else if (tag === 296) resUnit = readScalar();
   }
 
-  if (resUnit === 3) { // сантиметры -> переводим в дюймы
+  if (resUnit === 3) {
     xRes = Math.round(xRes * 2.54);
     yRes = Math.round(yRes * 2.54);
   }
@@ -627,43 +616,52 @@ async function parseTIFF(file, view, res) {
 
   const totalBits = bitsPerSample * samplesPerPixel;
   res.dimensions = \`\${width} × \${height}\`;
+  res.pixels = width * height;
   res.dpi = \`\${xRes} × \${yRes}\`;
-  res.bitDepth = \`\${totalBits} бит (\${bitsPerSample} бит × \${samplesPerPixel} кан.)\`;
+  res.bitDepth = \`\${totalBits} бит (\${bitsPerSample}×\${samplesPerPixel})\`;
+  res.bitDepthNum = totalBits;
   res.compression = tiffCompMap[compression] || \`Код \${compression}\`;
 
   res.extra = {
     'Порядок байтов (Byte Order)': littleEndian ? 'II (Little-Endian, Intel)' : 'MM (Big-Endian, Motorola)',
     'Смещение первого IFD': \`\${ifdOffset} байт\`,
     'Количество тегов в IFD0': numEntries,
-    'Каналов на пиксель (SamplesPerPixel)': samplesPerPixel
+    'Каналов на пиксель': samplesPerPixel
   };
 
   if (width === 0 || height === 0) {
     res.status = 'corrupted';
-    res.statusText = 'Файл поврежден (в каталоге IFD отсутствуют обязательные теги 256/257)';
+    res.statusText = 'Файл поврежден (в IFD нет тегов ширины/высоты 256/257)';
   }
 }
 `;
 
 // ============================================================================
-// ОСНОВНОЙ ПОТОК UI: ПУЛ ВОРКЕРОВ, ФИЛЬТРАЦИЯ, ПАГИНАЦИЯ И МОДАЛЬНОЕ ОКНО
+// ОСНОВНОЙ ПОТОК UI
 // ============================================================================
 const state = {
   allResults: [],
   filteredResults: [],
+  fileMap: new Map(), // Хранит ссылки на File для рендеринга превью в модалке
   currentPage: 1,
   pageSize: 100,
+  sortField: 'index',
+  sortAsc: true,
   workers: [],
-  isProcessing: false
+  currentPreviewUrl: null
 };
 
 const els = {
+  themeToggleBtn: document.getElementById('themeToggleBtn'),
+  dropZone: document.getElementById('dropZone'),
   folderInput: document.getElementById('folderInput'),
   fileInput: document.getElementById('fileInput'),
+  exportCsvBtn: document.getElementById('exportCsvBtn'),
   clearBtn: document.getElementById('clearBtn'),
   searchInput: document.getElementById('searchInput'),
   statusFilter: document.getElementById('statusFilter'),
   formatFilter: document.getElementById('formatFilter'),
+  pageSizeSelect: document.getElementById('pageSizeSelect'),
   progressWrapper: document.getElementById('progressWrapper'),
   progressText: document.getElementById('progressText'),
   speedText: document.getElementById('speedText'),
@@ -680,6 +678,7 @@ const els = {
   pageInfo: document.getElementById('pageInfo'),
   detailModal: document.getElementById('detailModal'),
   modalTitle: document.getElementById('modalTitle'),
+  modalSubtitle: document.getElementById('modalSubtitle'),
   modalBody: document.getElementById('modalBody'),
   closeModalBtn: document.getElementById('closeModalBtn')
 };
@@ -687,7 +686,14 @@ const els = {
 const threadCount = Math.min(navigator.hardwareConcurrency || 4, 8);
 els.statThreads.textContent = threadCount;
 
-// Инициализация пула Web Workers
+// Переключение темы
+els.themeToggleBtn.addEventListener('click', () => {
+  const html = document.documentElement;
+  const isDark = html.getAttribute('data-theme') === 'dark';
+  html.setAttribute('data-theme', isDark ? 'light' : 'dark');
+  els.themeToggleBtn.textContent = isDark ? '🌙 Темная тема' : '☀️ Светлая тема';
+});
+
 function initWorkerPool() {
   if (state.workers.length > 0) return;
   const blob = new Blob([workerCode], { type: 'application/javascript' });
@@ -697,24 +703,85 @@ function initWorkerPool() {
   }
 }
 
+// События загрузки и Drag & Drop
 els.folderInput.addEventListener('change', (e) => handleFilesSelected(e.target.files));
 els.fileInput.addEventListener('change', (e) => handleFilesSelected(e.target.files));
 
+els.dropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  els.dropZone.classList.add('dragover');
+});
+els.dropZone.addEventListener('dragleave', () => els.dropZone.classList.remove('dragover'));
+els.dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  els.dropZone.classList.remove('dragover');
+  if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+    handleFilesSelected(e.dataTransfer.files);
+  }
+});
+
+// Очистка
 els.clearBtn.addEventListener('click', () => {
   state.allResults = [];
   state.filteredResults = [];
+  state.fileMap.clear();
   state.currentPage = 1;
   els.folderInput.value = '';
   els.fileInput.value = '';
   els.clearBtn.disabled = true;
+  els.exportCsvBtn.disabled = true;
   els.progressWrapper.style.display = 'none';
   updateStats();
   renderTable();
 });
 
+// Экспорт в CSV
+els.exportCsvBtn.addEventListener('click', () => {
+  if (state.filteredResults.length === 0) return;
+  const headers = ['Index', 'FileName', 'Format', 'Dimensions', 'DPI', 'BitDepth', 'Compression', 'Status'];
+  const rows = state.filteredResults.map(r => [
+    r.index,
+    `"${r.fileName.replace(/"/g, '""')}"`,
+    r.detectedFormat,
+    `"${r.dimensions}"`,
+    `"${r.dpi}"`,
+    `"${r.bitDepth}"`,
+    `"${r.compression}"`,
+    `"${r.statusText}"`
+  ]);
+  const csvContent = '\uFEFF' + [headers.join(';'), ...rows.map(e => e.join(';'))].join('\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `image_metadata_report_${Date.now()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+// Фильтры и сортировка
 els.searchInput.addEventListener('input', applyFilters);
 els.statusFilter.addEventListener('change', applyFilters);
 els.formatFilter.addEventListener('change', applyFilters);
+els.pageSizeSelect.addEventListener('change', () => {
+  state.pageSize = Number(els.pageSizeSelect.value);
+  state.currentPage = 1;
+  renderTable();
+});
+
+document.querySelectorAll('th.sortable').forEach(th => {
+  th.addEventListener('click', () => {
+    const field = th.getAttribute('data-sort');
+    if (state.sortField === field) {
+      state.sortAsc = !state.sortAsc;
+    } else {
+      state.sortField = field;
+      state.sortAsc = true;
+    }
+    sortResults();
+    renderTable();
+  });
+});
 
 els.prevPageBtn.addEventListener('click', () => {
   if (state.currentPage > 1) {
@@ -731,17 +798,21 @@ els.nextPageBtn.addEventListener('click', () => {
   }
 });
 
-els.closeModalBtn.addEventListener('click', () => {
+function closeModal() {
   els.detailModal.style.display = 'none';
-});
+  if (state.currentPreviewUrl) {
+    URL.revokeObjectURL(state.currentPreviewUrl);
+    state.currentPreviewUrl = null;
+  }
+}
+els.closeModalBtn.addEventListener('click', closeModal);
 els.detailModal.addEventListener('click', (e) => {
-  if (e.target === els.detailModal) els.detailModal.style.display = 'none';
+  if (e.target === els.detailModal) closeModal();
 });
 
 async function handleFilesSelected(fileList) {
   if (!fileList || fileList.length === 0) return;
 
-  // Отбираем графические файлы (и подозрительные файлы с нужными расширениями)
   const validExts = new Set(['jpg', 'jpeg', 'gif', 'tif', 'tiff', 'bmp', 'png', 'pcx']);
   const files = Array.from(fileList).filter(f => {
     const idx = f.name.lastIndexOf('.');
@@ -750,14 +821,18 @@ async function handleFilesSelected(fileList) {
   });
 
   if (files.length === 0) {
-    alert('В выбранной папке не найдено файлов поддерживаемых форматов.');
+    alert('В выбранной папке не найдено графических файлов поддерживаемых форматов.');
     return;
   }
 
   initWorkerPool();
   state.allResults = [];
+  state.fileMap.clear();
+  files.forEach((f, idx) => state.fileMap.set(idx + 1, f));
+
   state.currentPage = 1;
   els.clearBtn.disabled = true;
+  els.exportCsvBtn.disabled = true;
   els.progressWrapper.style.display = 'block';
   els.progressBar.style.width = '0%';
 
@@ -765,7 +840,6 @@ async function handleFilesSelected(fileList) {
   let processed = 0;
   const startTime = performance.now();
 
-  // Разбиваем файлы на батчи по 50 штук для балансировки очереди между воркерами
   const batchSize = 50;
   const batches = [];
   for (let i = 0; i < total; i += batchSize) {
@@ -798,7 +872,7 @@ async function handleFilesSelected(fileList) {
         const pct = Math.min(100, Math.round((processed / total) * 100));
 
         els.progressBar.style.width = pct + '%';
-        els.progressText.textContent = `Обработано: ${processed} / ${total} (${pct}%)`;
+        els.progressText.textContent = `Обработано: ${processed} из ${total} (${pct}%)`;
         els.speedText.textContent = `${speed} файл/сек • Время: ${elapsedSec.toFixed(2)} с`;
 
         assignNextBatch(worker);
@@ -815,9 +889,8 @@ async function handleFilesSelected(fileList) {
     }
   });
 
-  // Сортируем по исходному индексу
-  state.allResults.sort((a, b) => a.index - b.index);
   els.clearBtn.disabled = false;
+  els.exportCsvBtn.disabled = false;
   updateStats();
   applyFilters();
 }
@@ -850,14 +923,31 @@ function applyFilters() {
     return true;
   });
 
+  sortResults();
   state.currentPage = 1;
   renderTable();
+}
+
+function sortResults() {
+  const f = state.sortField;
+  const mul = state.sortAsc ? 1 : -1;
+  state.filteredResults.sort((a, b) => {
+    const va = a[f], vb = b[f];
+    if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * mul;
+    return String(va).localeCompare(String(vb), 'ru') * mul;
+  });
 }
 
 function renderTable() {
   const list = state.filteredResults;
   if (list.length === 0) {
-    els.tableBody.innerHTML = `<tr><td colspan="9" class="empty-state">Нет данных для отображения</td></tr>`;
+    els.tableBody.innerHTML = `
+      <tr>
+        <td colspan="9" class="empty-state">
+          <div class="empty-illustration">🔍</div>
+          <div>Нет данных, подходящих под выбранные фильтры</div>
+        </td>
+      </tr>`;
     els.paginationControls.style.display = 'none';
     return;
   }
@@ -871,24 +961,26 @@ function renderTable() {
     if (item.status === 'mismatch') badgeClass = 'badge-warn';
     if (item.status === 'corrupted') badgeClass = 'badge-err';
 
+    const fmtClass = `fmt-${item.detectedFormat}`;
+
     return `
       <tr>
         <td>${item.index}</td>
-        <td title="${escapeHtml(item.fileName)}"><strong>${escapeHtml(truncate(item.fileName, 38))}</strong></td>
-        <td>${item.detectedFormat}</td>
+        <td title="${escapeHtml(item.fileName)}"><strong>${escapeHtml(truncate(item.fileName, 36))}</strong></td>
+        <td><span class="fmt-badge ${fmtClass}">${item.detectedFormat}</span></td>
         <td>${item.dimensions}</td>
         <td>${item.dpi}</td>
         <td>${item.bitDepth}</td>
         <td>${item.compression}</td>
         <td><span class="badge ${badgeClass}">${escapeHtml(item.statusText)}</span></td>
-        <td><button class="btn btn-sm" onclick="showDetails(${startIdx + idx})">🔍 Подробнее</button></td>
+        <td><button class="btn btn-sm" onclick="showDetails(${startIdx + idx})">👁️ Разбор</button></td>
       </tr>
     `;
   }).join('');
 
   els.tableBody.innerHTML = rowsHtml;
   els.paginationControls.style.display = 'flex';
-  els.pageInfo.textContent = `Страница ${state.currentPage} из ${totalPages} (Показано ${startIdx + 1}–${Math.min(startIdx + state.pageSize, list.length)} из ${list.length})`;
+  els.pageInfo.textContent = `Страница ${state.currentPage} из ${totalPages} • Показано ${startIdx + 1}–${Math.min(startIdx + state.pageSize, list.length)} из ${list.length}`;
   els.prevPageBtn.disabled = state.currentPage <= 1;
   els.nextPageBtn.disabled = state.currentPage >= totalPages;
 }
@@ -897,26 +989,51 @@ window.showDetails = function(filteredIndex) {
   const item = state.filteredResults[filteredIndex];
   if (!item) return;
 
-  els.modalTitle.textContent = `${item.fileName} (${formatBytes(item.fileSize)})`;
+  if (state.currentPreviewUrl) {
+    URL.revokeObjectURL(state.currentPreviewUrl);
+    state.currentPreviewUrl = null;
+  }
 
-  let extraHtml = '<div class="detail-grid">';
+  els.modalTitle.textContent = item.fileName;
+  els.modalSubtitle.textContent = `Размер: ${formatBytes(item.fileSize)} • Реальный формат: ${item.detectedFormat} • Статус: ${item.statusText}`;
+
+  const rawFile = state.fileMap.get(item.index);
+  let previewImgHtml = '<span style="font-size:0.75rem; color:#64748b; text-align:center; padding:6px;">Превью недоступно</span>';
+  if (rawFile && item.status !== 'corrupted' && ['JPEG', 'PNG', 'BMP', 'GIF'].includes(item.detectedFormat)) {
+    state.currentPreviewUrl = URL.createObjectURL(rawFile);
+    previewImgHtml = `<img src="${state.currentPreviewUrl}" alt="preview">`;
+  }
+
+  let html = `
+    <div class="preview-section">
+      <div class="preview-img-box">${previewImgHtml}</div>
+      <div style="flex:1;">
+        <div style="font-size:0.8rem; color:var(--muted); font-weight:600;">ПЕРВЫЕ 16 БАЙТ ФАЙЛА (HEX MAGIC SIGNATURE):</div>
+        <div class="hex-dump">${escapeHtml(item.magicHex)}</div>
+        <div style="margin-top:8px; font-size:0.84rem;">
+          Геометрия: <strong>${item.dimensions}</strong> • Разрешение: <strong>${item.dpi} DPI</strong> • Глубина: <strong>${item.bitDepth}</strong>
+        </div>
+      </div>
+    </div>
+    <div class="detail-grid">
+  `;
+
   for (const [key, val] of Object.entries(item.extra || {})) {
     if (key === 'quantTables') continue;
-    extraHtml += `
+    html += `
       <div class="detail-box">
-        <div style="color: #64748b; font-size: 0.78rem;">${escapeHtml(key)}</div>
-        <div style="font-weight: 600; margin-top: 2px;">${escapeHtml(String(val))}</div>
+        <div style="color: var(--muted); font-size: 0.76rem;">${escapeHtml(key)}</div>
+        <div style="font-weight: 700; margin-top: 3px;">${escapeHtml(String(val))}</div>
       </div>
     `;
   }
-  extraHtml += '</div>';
+  html += '</div>';
 
-  // Если это JPEG и есть матрицы квантования DQT — рендерим их наглядно 8x8
   if (item.extra && item.extra.quantTables && item.extra.quantTables.length > 0) {
-    extraHtml += `<h3 style="margin: 12px 0 6px; font-size: 0.98rem;">Матрицы квантования JPEG (Маркер DQT 0xFFDB):</h3>`;
+    html += `<h3 style="margin: 14px 0 6px; font-size: 0.96rem;">Матрицы квантования JPEG (Маркер DQT 0xFFDB):</h3>`;
     for (const qt of item.extra.quantTables) {
       const targetName = qt.id === 0 ? 'Яркость (Luminance Y)' : 'Цветность (Chrominance Cb/Cr)';
-      extraHtml += `<div style="margin-bottom: 12px;">
+      html += `<div style="margin-bottom: 12px;">
         <strong>Таблица #${qt.id} — ${targetName} (${qt.precision}-бит):</strong>
         <div class="matrix-grid">
           ${qt.values.map(v => `<span>${v}</span>`).join('')}
@@ -925,21 +1042,20 @@ window.showDetails = function(filteredIndex) {
     }
   }
 
-  // Теоретическая справка для защиты лабораторной работы
   const theoryMap = {
-    'JPEG': `<strong>Откуда берутся данные в JPEG:</strong> Файл начинается с сигнатуры SOI (<code>FF D8</code>) и заканчивается маркером EOI (<code>FF D9</code>). Геометрия и глубина цвета извлекаются из маркера кадра <code>SOF0 (FF C0)</code> или <code>SOF2 (FF C2)</code>. Разрешение DPI хранится в сегменте <code>APP0 (FF E0, идентификатор JFIF)</code>. <strong>Матрица квантования (DQT, маркер FF DB)</strong> — массив 8×8 коэффициентов, на которые делятся частоты после дискретного косинусного преобразования (DCT). Именно на этом шаге происходит сжатие с потерями: большие числа в матрице сильнее обнуляют высокие частоты.`,
-    'PNG': `<strong>Откуда берутся данные в PNG:</strong> Первые 8 байт — сигнатура <code>89 50 4E 47 0D 0A 1A 0A</code>. За ней идет чанк <code>IHDR</code> (13 байт данных), содержащий ширину (4 байта Big-Endian), высоту (4 байта), глубину цвета, тип цвета и метод фильтрации. Фильтрация в PNG применяется построчно перед сжатием <code>Deflate</code> для повышения повторяемости байтов. Разрешение хранится в чанке <code>pHYs</code> (пикселей на метр, умножается на 0.0254 для перевода в DPI). Валидный файл обязан завершаться 12-байтным чанком <code>IEND</code>.`,
-    'BMP': `<strong>Откуда берутся данные в BMP:</strong> Первые 14 байт — структура <code>BITMAPFILEHEADER</code> (сигнатура <code>42 4D "BM"</code>, размер файла и смещение до пикселей <code>bfOffBits</code>). С 14-го байта идет <code>BITMAPINFOHEADER</code> (обычно 40 байт), где хранятся ширина, высота, битность (<code>biBitCount</code>), код сжатия (<code>0 = BI_RGB</code>, <code>1 = BI_RLE8</code>, <code>2 = BI_RLE4</code>) и разрешение в пикселях на метр. <strong>Как устроена палитра:</strong> при битности ≤ 8 бит сразу после заголовка располагается массив структур <code>RGBQUAD</code> (по 4 байта: B, G, R, 0x00), а в самом растре хранятся не цвета, а индексы ячеек этой таблицы.`,
-    'GIF': `<strong>Откуда берутся данные в GIF:</strong> Первые 6 байт — сигнатура (<code>GIF87a</code> или <code>GIF89a</code>). Следующие 7 байт — <code>Logical Screen Descriptor</code>, откуда берутся ширина и высота (2 байта Little-Endian), а также упакованный байт флагов (бит 7 — наличие глобальной палитры GCT, биты 0–2 — размер палитры $2^{N+1}$ цветов). В конце файла обязательно стоит байт-трейлер <code>0x3B</code>.`,
-    'PCX': `<strong>Откуда берутся данные в PCX:</strong> Фиксированный 128-байтный заголовок начинается с байта <code>0x0A</code>. Ширина и высота вычисляются по координатам окна: <code>Width = Xmax - Xmin + 1</code>, <code>Height = Ymax - Ymin + 1</code>. Для 256-цветных файлов палитра из 768 байт (256×3 RGB) записывается в самый конец файла после контрольного байта <code>0x0C</code> (за 769 байт до конца).`,
-    'TIFF': `<strong>Откуда берутся данные в TIFF:</strong> Первые 2 байта задают порядок байтов: <code>49 49 ("II")</code> — Little-Endian или <code>4D 4D ("MM")</code> — Big-Endian, далее число <code>42 (0x002A)</code> и 4-байтное смещение первой таблицы <code>IFD (Image File Directory)</code>. Каждая запись в IFD занимает 12 байт (Тег, Тип, Количество, Значение/Смещение): тег <code>256</code> — ширина, <code>257</code> — высота, <code>258</code> — битность, <code>259</code> — сжатие, <code>282/283</code> — разрешение (дробь RATIONAL из двух 32-битных чисел).`
+    'JPEG': `<strong>Откуда берутся данные в JPEG:</strong> Файл начинается с сигнатуры SOI (<code>FF D8</code>) и заканчивается маркером EOI (<code>FF D9</code>). Геометрия и глубина цвета извлекаются из маркера кадра <code>SOF0 (FF C0)</code> или <code>SOF2 (FF C2)</code>. Разрешение DPI хранится в сегменте <code>APP0 (FF E0, JFIF)</code>. <strong>Матрица квантования (DQT, маркер FF DB)</strong> — таблица 8×8 коэффициентов делителей для частот DCT.`,
+    'PNG': `<strong>Откуда берутся данные в PNG:</strong> Первые 8 байт — сигнатура <code>89 50 4E 47 0D 0A 1A 0A</code>. За ней идет 13-байтный чанк <code>IHDR</code> (ширина, высота, битность, тип цвета, метод фильтрации). Разрешение берется из чанка <code>pHYs</code> (пикселей на метр × 0.0254). Файл обязан заканчиваться чанком <code>IEND</code>.`,
+    'BMP': `<strong>Откуда берутся данные в BMP:</strong> Первые 14 байт — <code>BITMAPFILEHEADER</code> (сигнатура <code>42 4D "BM"</code>, размер файла, смещение <code>bfOffBits</code>). С 14-го байта — <code>BITMAPINFOHEADER</code> (ширина, высота, битность, тип сжатия <code>BI_RGB / BI_RLE8 / BI_RLE4</code>). При битности ≤ 8 бит используется палитра <code>RGBQUAD</code> (по 4 байта на цвет).`,
+    'GIF': `<strong>Откуда берутся данные в GIF:</strong> Первые 6 байт — сигнатура <code>GIF87a / GIF89a</code>. Далее 7 байт — <code>Logical Screen Descriptor</code> (ширина, высота и байт флагов глобальной палитры GCT). В конце файла обязателен байт <code>0x3B</code>.`,
+    'PCX': `<strong>Откуда берутся данные в PCX:</strong> 128-байтный заголовок начинается с <code>0x0A</code>. Размеры вычисляются как <code>Xmax - Xmin + 1</code> и <code>Ymax - Ymin + 1</code>. 256-цветная палитра VGA (768 байт) находится в конце файла после маркера <code>0x0C</code>.`,
+    'TIFF': `<strong>Откуда берутся данные в TIFF:</strong> Первые 2 байта задают порядок байтов (<code>II</code> — Little-Endian, <code>MM</code> — Big-Endian), далее <code>42</code> и смещение таблицы <code>IFD</code>. Из 12-байтных тегов IFD читаются <code>256</code> (ширина), <code>257</code> (высота), <code>258</code> (битность), <code>259</code> (сжатие), <code>282/283</code> (разрешение DPI).`
   };
 
   if (theoryMap[item.detectedFormat]) {
-    extraHtml += `<div class="theory-block">${theoryMap[item.detectedFormat]}</div>`;
+    html += `<div class="theory-block">${theoryMap[item.detectedFormat]}</div>`;
   }
 
-  els.modalBody.innerHTML = extraHtml;
+  els.modalBody.innerHTML = html;
   els.detailModal.style.display = 'flex';
 };
 
