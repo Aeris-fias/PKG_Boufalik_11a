@@ -52,7 +52,6 @@ body {
   margin: 0 auto;
 }
 
-/* Шапка с градиентом */
 .hero-header {
   background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #0d9488 100%);
   color: #ffffff;
@@ -100,7 +99,6 @@ body {
   background: rgba(255, 255, 255, 0.28);
 }
 
-/* Карточки статистики */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
@@ -159,7 +157,6 @@ body {
   font-weight: 800;
 }
 
-/* Панель управления и Drag & Drop */
 .controls-card, .table-card {
   background: var(--card);
   border-radius: 16px;
@@ -210,7 +207,6 @@ body {
   flex-wrap: wrap;
 }
 
-/* Кнопки */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -284,7 +280,6 @@ body {
   color: var(--primary);
 }
 
-/* Поиск и фильтры */
 .filters-row {
   display: flex;
   gap: 12px;
@@ -331,7 +326,6 @@ body {
   cursor: pointer;
 }
 
-/* Прогресс-бар */
 .progress-wrapper {
   margin: 0 0 18px 0;
   padding: 14px 16px;
@@ -363,7 +357,6 @@ body {
   transition: width 0.12s linear;
 }
 
-/* Таблица */
 .table-responsive {
   overflow-x: auto;
 }
@@ -419,7 +412,6 @@ tbody tr:hover {
   margin-bottom: 10px;
 }
 
-/* Цветные бейджи статусов */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -438,7 +430,6 @@ tbody tr:hover {
 :root[data-theme="dark"] .badge-warn { color: #fbbf24; }
 :root[data-theme="dark"] .badge-err { color: #f87171; }
 
-/* Цветные бейджи форматов */
 .fmt-badge {
   display: inline-block;
   padding: 3px 9px;
@@ -472,7 +463,6 @@ tbody tr:hover {
   color: var(--muted);
 }
 
-/* Модальное окно */
 .modal-overlay {
   position: fixed;
   inset: 0;
