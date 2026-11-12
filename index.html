@@ -3,16 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ЛР3 — Обработка изображений</title>
+  <title>Обработка изображений</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="progressBar"></div>
   
   <header class="header">
-    <h1>Обработка цифровых изображений (Вариант 5)</h1>
+    <h1>Обработка цифровых изображений</h1>
     <div class="actions">
-      <label class="btn btn-primary" for="fileInput">Загрузить фото</label>
+      <label class="btn btn-primary" for="fileInput">Загрузить свое фото</label>
       <input type="file" id="fileInput" accept="image/*" hidden>
       <button class="btn btn-outline" id="downloadBtn">Скачать результат</button>
     </div>
@@ -21,10 +21,10 @@
   <main class="container">
     <aside class="sidebar">
       <div class="card">
-        <h3>1. Тестовые изображения</h3>
+        <h3>1. Тестовые фото</h3>
         <div class="preset-list" id="presetGrid">
           <button class="preset-btn active" data-preset="lowContrast">Малоконтрастное (CLAHE)</button>
-          <button class="preset-btn" data-preset="saltPepper">Шум (Медианный)</button>
+          <button class="preset-btn" data-preset="saltPepper">Зашумленное (Медиана)</button>
           <button class="preset-btn" data-preset="unevenText">Текст в тени (Пороги)</button>
           <button class="preset-btn" data-preset="edgesShapes">Контуры (Собель/Кэнни)</button>
           <button class="preset-btn" data-preset="morphology">Детали (Морфология)</button>
@@ -33,19 +33,19 @@
       </div>
 
       <div class="card">
-        <h3>2. Настройки обработки</h3>
+        <h3>2. Настройки алгоритма</h3>
         <select id="methodSelect" class="input-element"></select>
         
         <div id="dynamicControls" class="controls-area"></div>
         
         <select id="paddingSelect" class="input-element">
-          <option value="reflect">Обработка краев: Reflect</option>
-          <option value="clamp">Обработка краев: Clamp</option>
+          <option value="reflect">Обработка краев: Зеркально (Reflect)</option>
+          <option value="clamp">Обработка краев: Дублирование (Clamp)</option>
         </select>
         
         <label class="checkbox-label">
           <input type="checkbox" id="useWorkersCheck" checked>
-          Ускорение Web Workers
+          Ускорение потоками (Web Workers)
         </label>
         
         <button class="btn btn-accent full-width" id="applyBtn">Применить алгоритм</button>
@@ -67,11 +67,6 @@
           <div class="stats" id="dstStats"></div>
           <canvas id="dstHistCanvas" class="hist-canvas"></canvas>
         </div>
-      </div>
-
-      <div class="card report-card">
-        <h3>Отчет по алгоритму</h3>
-        <div id="reportBody"></div>
       </div>
     </section>
   </main>
