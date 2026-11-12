@@ -3,16 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Обработка изображений</title>
+  <title>ЛР3 — Пороговая обработка</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="progressBar"></div>
   
   <header class="header">
-    <h1>Обработка цифровых изображений</h1>
+    <h1>Пороговая обработка (Оцу и Изодата)</h1>
     <div class="actions">
-      <label class="btn btn-primary" for="fileInput">Загрузить свое фото</label>
+      <label class="btn btn-primary" for="fileInput">Загрузить фото</label>
       <input type="file" id="fileInput" accept="image/*" hidden>
       <button class="btn btn-outline" id="downloadBtn">Скачать результат</button>
     </div>
@@ -23,32 +23,19 @@
       <div class="card">
         <h3>1. Тестовые фото</h3>
         <div class="preset-list" id="presetGrid">
-          <button class="preset-btn active" data-preset="lowContrast">Малоконтрастное (CLAHE)</button>
-          <button class="preset-btn" data-preset="saltPepper">Зашумленное (Медиана)</button>
-          <button class="preset-btn" data-preset="unevenText">Текст в тени (Пороги)</button>
-          <button class="preset-btn" data-preset="edgesShapes">Контуры (Собель/Кэнни)</button>
-          <button class="preset-btn" data-preset="morphology">Детали (Морфология)</button>
-          <button class="preset-btn" data-preset="colorCast">Цвет (Эквализация)</button>
+          <button class="preset-btn active" data-preset="document">Тестовый документ</button>
+          <button class="preset-btn" data-preset="shapes">Геометрические фигуры</button>
         </div>
       </div>
 
       <div class="card">
-        <h3>2. Настройки алгоритма</h3>
-        <select id="methodSelect" class="input-element"></select>
-        
-        <div id="dynamicControls" class="controls-area"></div>
-        
-        <select id="paddingSelect" class="input-element">
-          <option value="reflect">Обработка краев: Зеркально (Reflect)</option>
-          <option value="clamp">Обработка краев: Дублирование (Clamp)</option>
+        <h3>2. Метод бинаризации</h3>
+        <select id="methodSelect" class="input-element">
+          <option value="otsu">Глобальный порог: Метод Оцу</option>
+          <option value="isodata">Глобальный порог: Метод Изодата</option>
         </select>
         
-        <label class="checkbox-label">
-          <input type="checkbox" id="useWorkersCheck" checked>
-          Ускорение потоками (Web Workers)
-        </label>
-        
-        <button class="btn btn-accent full-width" id="applyBtn">Применить алгоритм</button>
+        <button class="btn btn-accent full-width" id="applyBtn" style="margin-top: 10px;">Применить порог</button>
       </div>
     </aside>
 
