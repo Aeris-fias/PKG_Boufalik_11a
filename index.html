@@ -3,60 +3,103 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ЛР3 — Пороговая обработка</title>
+  <title>Лабораторная №3</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="progressBar"></div>
-  
-  <header class="header">
-    <h1>Пороговая обработка (Оцу и Изодата)</h1>
-    <div class="actions">
-      <label class="btn btn-primary" for="fileInput">Загрузить фото</label>
-      <input type="file" id="fileInput" accept="image/*" hidden>
-      <button class="btn btn-outline" id="downloadBtn">Скачать результат</button>
-    </div>
-  </header>
-
-  <main class="container">
+  <div class="layout">
     <aside class="sidebar">
-      <div class="card">
-        <h3>1. Тестовые фото</h3>
-        <div class="preset-list" id="presetGrid">
-          <button class="preset-btn active" data-preset="document">Тестовый документ</button>
-          <button class="preset-btn" data-preset="shapes">Геометрические фигуры</button>
+      <div class="app-card">
+        <div class="app-header">
+          <h2>Лабораторная №3</h2>
         </div>
-      </div>
+        <p class="app-subtitle">Основы обработки цифровых<br>изображений</p>
 
-      <div class="card">
-        <h3>2. Метод бинаризации</h3>
-        <select id="methodSelect" class="input-element">
-          <option value="otsu">Глобальный порог: Метод Оцу</option>
-          <option value="isodata">Глобальный порог: Метод Изодата</option>
-        </select>
-        
-        <button class="btn btn-accent full-width" id="applyBtn" style="margin-top: 10px;">Применить порог</button>
+        <div class="section">
+          <h3 class="section-title"><span class="num-icon">1</span> Подготовка</h3>
+          
+          <div class="control-group">
+            <label>Тестовая сцена:</label>
+            <div class="select-wrapper">
+              <select id="presetSelect" class="custom-select">
+                <option value="shapes">Фигуры (Идеально для Оцу)</option>
+                <option value="document">Документ (Для ISODATA)</option>
+                <option value="photo">Фотография (Собель / Кэнни)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="control-group">
+            <label>Обработка краев (Edge Padding):</label>
+            <div class="select-wrapper">
+              <select id="paddingSelect" class="custom-select">
+                <option value="clamp">Clamp (Дублирование)</option>
+                <option value="reflect">Reflect (Отражение)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <hr class="divider">
+
+        <div class="section">
+          <h3 class="section-title"><span class="num-icon">2</span> Бинаризация</h3>
+          <p class="section-desc">Глобальная пороговая обработка</p>
+          
+          <div class="button-stack">
+            <button class="method-btn active" data-method="otsu" data-theme="blue">
+              <span class="btn-title">Метод Оцу</span>
+              <span class="btn-subtitle">Авто-максимизация дисперсии</span>
+            </button>
+            
+            <button class="method-btn" data-method="isodata" data-theme="blue">
+              <span class="btn-title">Метод ISODATA</span>
+              <span class="btn-subtitle">Итеративный поиск порога</span>
+            </button>
+          </div>
+        </div>
+
+        <hr class="divider">
+
+        <div class="section">
+          <h3 class="section-title"><span class="num-icon">3</span> Сегментация</h3>
+          <p class="section-desc">Поиск контуров (маски 3×3)</p>
+          
+          <div class="grid-2">
+            <button class="method-btn small" data-method="points" data-theme="gray">
+              <span class="btn-title">Точки (Лаплас)</span>
+            </button>
+            <button class="method-btn small" data-method="lines" data-theme="gray">
+              <span class="btn-title">Линии (Гор.)</span>
+            </button>
+          </div>
+          
+          <div class="button-stack mt-8">
+            <button class="method-btn" data-method="sobel" data-theme="pink">
+              <span class="btn-title">Собель (Перепады)</span>
+              <span class="btn-subtitle">Градиенты по X и Y</span>
+            </button>
+            
+            <button class="method-btn" data-method="canny" data-theme="green">
+              <span class="btn-title">Детектор Кэнни 🌟</span>
+              <span class="btn-subtitle">Утончение контуров (NMS)</span>
+            </button>
+          </div>
+        </div>
       </div>
     </aside>
 
-    <section class="workspace">
-      <div class="image-grid">
-        <div class="card view-box">
-          <div class="box-header">До (<span id="srcMeta"></span>)</div>
-          <canvas id="srcCanvas"></canvas>
-          <div class="stats" id="srcStats"></div>
-          <canvas id="srcHistCanvas" class="hist-canvas"></canvas>
-        </div>
-
-        <div class="card view-box">
-          <div class="box-header">После <span id="perfInfo" class="badge"></span></div>
-          <canvas id="dstCanvas"></canvas>
-          <div class="stats" id="dstStats"></div>
-          <canvas id="dstHistCanvas" class="hist-canvas"></canvas>
-        </div>
+    <main class="workspace">
+      <div class="view-panel">
+        <div class="view-header">Исходное изображение</div>
+        <div class="canvas-wrap"><canvas id="srcCanvas"></canvas></div>
       </div>
-    </section>
-  </main>
+      <div class="view-panel">
+        <div class="view-header">Результат обработки <span class="badge-time" id="perfInfo">0 мс</span></div>
+        <div class="canvas-wrap"><canvas id="dstCanvas"></canvas></div>
+      </div>
+    </main>
+  </div>
 
   <script src="buffer.js"></script>
   <script src="algorithms.js"></script>

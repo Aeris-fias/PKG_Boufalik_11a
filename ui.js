@@ -1,155 +1,98 @@
-class PresetGenerator {
-  static create(type, width = 520, height = 360) {
+class AppUI {
+  constructor() {
+    this.srcBuffer = null;
+    this.dstBuffer = null;
+    this.currentMethod = 'otsu';
+    
+    this.srcCanvas = document.getElementById("srcCanvas");
+    this.dstCanvas = document.getElementById("dstCanvas");
+    
+    this.bindEvents();
+    this.loadPreset("shapes");
+  }
+
+  bindEvents() {
+    const buttons = document.querySelectorAll('.method-btn');
+    buttons.forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        buttons.forEach(b => b.classList.remove('active'));
+        e.currentTarget.classList.add('active');
+        this.currentMethod = e.currentTarget.dataset.method;
+        this.processImage();
+      });
+    });
+
+    document.getElementById("presetSelect").addEventListener("change", (e) => {
+      this.loadPreset(e.target.value);
+    });
+
+    document.getElementById("paddingSelect").addEventListener("change", () => {
+      this.processImage();
+    });
+  }
+
+  loadPreset(presetName) {
+    const w = 500, h = 350;
     const canvas = document.createElement("canvas");
-    canvas.width = width; canvas.height = height;
+    canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext("2d");
 
-    if (type === "document") {
-      ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, width, height);
-      ctx.fillStyle = "#000000"; ctx.font = "bold 26px sans-serif";
-      const lines = ["ГЛОБАЛЬНАЯ БИНАРИЗАЦИЯ", "Методы Оцу и Изодата", "вычисляют порог по гистограмме."];
-      lines.forEach((line, i) => ctx.fillText(line, 40, 120 + i * 50));
-
-      const imgData = ctx.getImageData(0, 0, width, height);
+    if (presetName === "shapes") {
+      ctx.fillStyle = "#2c3e50"; ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = "#ecf0f1"; ctx.beginPath(); ctx.arc(150, 150, 80, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = "#bdc3c7"; ctx.fillRect(280, 80, 140, 140);
+      ctx.fillStyle = "#95a5a6"; ctx.beginPath(); ctx.moveTo(80, 300); ctx.lineTo(160, 240); ctx.lineTo(240, 300); ctx.fill();
+    } else if (presetName === "document") {
+      ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = "#000000"; ctx.font = "bold 24px sans-serif";
+      ctx.fillText("ГЛОБАЛЬНАЯ БИНАРИЗАЦИЯ", 40, 100);
+      ctx.fillText("Методы Оцу и Изодата", 40, 150);
+      const imgData = ctx.getImageData(0, 0, w, h);
       const d = imgData.data;
-      for (let y = 0; y < height; y++) {
-        for (let x = 0; x < width; x++) {
-          const idx = (y * width + x) * 4;
-          const light = 0.4 + 0.6 * (x / width); 
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const idx = (y * w + x) * 4;
+          const light = 0.3 + 0.7 * (x / w); 
           d[idx] *= light; d[idx+1] *= light; d[idx+2] *= light;
         }
       }
       ctx.putImageData(imgData, 0, 0);
     } else {
-      ctx.fillStyle = "#2c3e50"; ctx.fillRect(0, 0, width, height);
-      ctx.fillStyle = "#ecf0f1"; ctx.beginPath(); ctx.arc(150, 180, 90, 0, Math.PI*2); ctx.fill();
-      ctx.fillStyle = "#bdc3c7"; ctx.fillRect(280, 80, 160, 160);
+      ctx.fillStyle = "#8e44ad"; ctx.fillRect(0, 0, w, h);
+      ctx.fillStyle = "#f1c40f"; ctx.beginPath(); ctx.arc(250, 175, 100, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = "#3498db"; ctx.fillRect(100, 100, 100, 100);
+      ctx.fillStyle = "#e74c3c"; ctx.fillRect(300, 200, 120, 80);
+      ctx.lineWidth = 10; ctx.strokeStyle = "#fff"; ctx.strokeRect(50, 50, 400, 250);
     }
-    return new PixelBuffer(width, height, ctx.getImageData(0, 0, width, height).data);
-  }
-}
 
-class AppUI {
-  constructor() {
-    this.srcBuffer = null;
-    this.dstBuffer = null;
-    
-    this.srcCanvas = document.getElementById("srcCanvas");
-    this.dstCanvas = document.getElementById("dstCanvas");
-    this.srcHistCanvas = document.getElementById("srcHistCanvas");
-    this.dstHistCanvas = document.getElementById("dstHistCanvas");
-
-    this.bindEvents();
-    this.loadPreset("document");
+    this.srcBuffer = new PixelBuffer(w, h, ctx.getImageData(0, 0, w, h).data);
+    this.renderBuffer(this.srcBuffer, this.srcCanvas);
+    this.processImage();
   }
 
-  bindEvents() {
-    document.getElementById("presetGrid").addEventListener("click", (e) => {
-      const btn = e.target.closest(".preset-btn");
-      if (!btn) return;
-      document.querySelectorAll(".preset-btn").forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      this.loadPreset(btn.dataset.preset);
-    });
-
-    document.getElementById("methodSelect").addEventListener("change", () => this.executeCurrentMethod());
-    document.getElementById("applyBtn").addEventListener("click", () => this.executeCurrentMethod());
-
-    document.getElementById("fileInput").addEventListener("change", (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const img = new Image();
-        img.onload = () => {
-          const maxDim = 900;
-          let w = img.width, h = img.height;
-          if (w > maxDim || h > maxDim) {
-            const scale = maxDim / Math.max(w, h);
-            w = Math.round(w * scale); h = Math.round(h * scale);
-          }
-          const c = document.createElement("canvas");
-          c.width = w; c.height = h;
-          c.getContext("2d").drawImage(img, 0, 0, w, h);
-          this.srcBuffer = new PixelBuffer(w, h, c.getContext("2d").getImageData(0, 0, w, h).data);
-          this.renderBufferToCanvas(this.srcBuffer, this.srcCanvas);
-          this.executeCurrentMethod();
-        };
-        img.src = ev.target.result;
-      };
-      reader.readAsDataURL(file);
-    });
-
-    document.getElementById("downloadBtn").addEventListener("click", () => {
-      const link = document.createElement("a");
-      link.download = "binarized_image.png";
-      link.href = this.dstCanvas.toDataURL("image/png");
-      link.click();
-    });
-  }
-
-  loadPreset(presetName) {
-    this.srcBuffer = PresetGenerator.create(presetName);
-    this.renderBufferToCanvas(this.srcBuffer, this.srcCanvas);
-    this.executeCurrentMethod();
-  }
-
-  setProgress(pct) {
-    document.getElementById("progressBar").style.width = `${pct}%`;
-  }
-
-  renderBufferToCanvas(buffer, canvas) {
-    canvas.width = buffer.width;
-    canvas.height = buffer.height;
-    canvas.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(buffer.data), buffer.width, buffer.height), 0, 0);
-  }
-
-  drawHistogram(histData, canvas) {
-    const ctx = canvas.getContext("2d");
-    const w = canvas.width = 512;
-    const h = canvas.height = 130;
-    ctx.clearRect(0, 0, w, h);
-
-    let maxVal = 1;
-    for (let i = 1; i < 255; i++) maxVal = Math.max(maxVal, histData.histL[i]);
-
-    ctx.beginPath();
-    ctx.moveTo(0, h);
-    for (let i = 0; i < 256; i++) {
-      ctx.lineTo((i / 255) * w, h - Math.min(1, histData.histL[i] / maxVal) * (h - 5));
-    }
-    ctx.lineTo(w, h);
-    ctx.fillStyle = "rgba(255, 71, 87, 0.6)";
-    ctx.fill();
-  }
-
-  executeCurrentMethod() {
+  processImage() {
     if (!this.srcBuffer) return;
-    this.setProgress(50);
-    const method = document.getElementById("methodSelect").value;
+    const padding = document.getElementById("paddingSelect").value;
     const t0 = performance.now();
     
     let dst = null;
-    if (method === "otsu") dst = ImageAlgorithms.thresholdOtsu(this.srcBuffer);
-    else if (method === "isodata") dst = ImageAlgorithms.thresholdIsodata(this.srcBuffer);
+    if (this.currentMethod === "otsu") dst = ImageAlgorithms.thresholdOtsu(this.srcBuffer);
+    else if (this.currentMethod === "isodata") dst = ImageAlgorithms.thresholdIsodata(this.srcBuffer);
+    else if (this.currentMethod === "points") dst = ImageAlgorithms.detectPoints(this.srcBuffer, padding);
+    else if (this.currentMethod === "lines") dst = ImageAlgorithms.detectHorizontalLines(this.srcBuffer, padding);
+    else if (this.currentMethod === "sobel") dst = ImageAlgorithms.detectSobel(this.srcBuffer, padding);
+    else if (this.currentMethod === "canny") dst = ImageAlgorithms.detectCanny(this.srcBuffer, padding);
 
     const elapsed = (performance.now() - t0).toFixed(1);
-    this.setProgress(100);
-    setTimeout(() => this.setProgress(0), 200);
-
     this.dstBuffer = dst;
-    this.renderBufferToCanvas(dst, this.dstCanvas);
+    this.renderBuffer(dst, this.dstCanvas);
+    document.getElementById("perfInfo").textContent = `${elapsed} мс`;
+  }
 
-    document.getElementById("perfInfo").textContent = `${elapsed} мс | Порог T = ${dst.computedThreshold}`;
-    document.getElementById("srcMeta").textContent = `${this.srcBuffer.width} × ${this.srcBuffer.height} px`;
-
-    const srcH = ImageAlgorithms.computeHistograms(this.srcBuffer);
-    const dstH = ImageAlgorithms.computeHistograms(this.dstBuffer);
-    this.drawHistogram(srcH, this.srcHistCanvas);
-    this.drawHistogram(dstH, this.dstHistCanvas);
-
-    document.getElementById("srcStats").innerHTML = `<span>Яркость: ${srcH.mean.toFixed(1)}</span>`;
-    document.getElementById("dstStats").innerHTML = `<span>Бинарное изображение (0 и 255)</span>`;
+  renderBuffer(buffer, canvas) {
+    canvas.width = buffer.width;
+    canvas.height = buffer.height;
+    canvas.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(buffer.data), buffer.width, buffer.height), 0, 0);
   }
 }
 
