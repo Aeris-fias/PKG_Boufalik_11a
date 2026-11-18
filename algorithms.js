@@ -1,201 +1,208 @@
 class ImageAlgorithms {
-  static thresholdOtsu(src) {
-    const gray = src.toGrayscaleArray();
-    const total = gray.length;
-    const hist = new Uint32Array(256);
-    for (let i = 0; i < total; i++) hist[gray[i]]++;
+  static computeHistograms(buffer) {
+    const histR = new Uint32Array(256), histG = new Uint32Array(256), histB = new Uint32Array(256), histL = new Uint32Array(256);
+    const d = buffer.data;
+    const total = buffer.width * buffer.height;
+    let sumL = 0, sumL2 = 0;
 
-    let sumAll = 0, sumB = 0, wB = 0, maxVar = 0, threshold = 0;
-    for (let t = 0; t < 256; t++) sumAll += t * hist[t];
+    for (let i = 0, p = 0; i < total; i++, p += 4) {
+      const r = d[p], g = d[p+1], b = d[p+2];
+      const l = (0.299 * r + 0.587 * g + 0.114 * b + 0.5) | 0;
+      histR[r]++; histG[g]++; histB[b]++; histL[l]++;
+      sumL += l; sumL2 += l * l;
+    }
+    const mean = sumL / total;
+    const std = Math.sqrt(Math.max(0, sumL2 / total - mean * mean));
+    return { histR, histG, histB, histL, mean, std };
+  }
 
-    for (let t = 0; t < 256; t++) {
-      wB += hist[t];
-      if (wB === 0) continue;
-      const wF = total - wB;
-      if (wF === 0) break;
-      
-      sumB += t * hist[t];
-      const mB = sumB / wB;
-      const mF = (sumAll - sumB) / wF;
-      const betweenVar = wB * wF * (mB - mF) * (mB - mF);
-      
-      if (betweenVar > maxVar) { maxVar = betweenVar; threshold = t; }
+  static linearContrast(src) {
+    const dst = src.clone();
+    const d = dst.data;
+    let minR = 255, maxR = 0, minG = 255, maxG = 0, minB = 255, maxB = 0;
+
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i] < minR) minR = d[i]; if (d[i] > maxR) maxR = d[i];
+      if (d[i+1] < minG) minG = d[i+1]; if (d[i+1] > maxG) maxG = d[i+1];
+      if (d[i+2] < minB) minB = d[i+2]; if (d[i+2] > maxB) maxB = d[i+2];
     }
 
-    const dst = new PixelBuffer(src.width, src.height);
-    for (let y = 0; y < src.height; y++) {
-      for (let x = 0; x < src.width; x++) {
-        const v = gray[y * src.width + x] > threshold ? 255 : 0;
-        dst.setRGBA(x, y, v, v, v, 255);
-      }
+    const sR = maxR > minR ? 255 / (maxR - minR) : 1;
+    const sG = maxG > minG ? 255 / (maxG - minG) : 1;
+    const sB = maxB > minB ? 255 / (maxB - minB) : 1;
+
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = ((d[i] - minR) * sR + 0.5) | 0;
+      d[i+1] = ((d[i+1] - minG) * sG + 0.5) | 0;
+      d[i+2] = ((d[i+2] - minB) * sB + 0.5) | 0;
     }
     return dst;
   }
 
-  static thresholdIsodata(src) {
-    const gray = src.toGrayscaleArray();
-    let T = 128;
-    for (let iter = 0; iter < 30; iter++) {
-      let sum1 = 0, cnt1 = 0, sum2 = 0, cnt2 = 0;
-      for (let i = 0; i < gray.length; i++) {
-        if (gray[i] <= T) { sum1 += gray[i]; cnt1++; }
-        else { sum2 += gray[i]; cnt2++; }
-      }
-      const nextT = Math.round(((cnt1 ? sum1/cnt1 : 0) + (cnt2 ? sum2/cnt2 : 255)) / 2);
-      if (Math.abs(nextT - T) < 1) break;
-      T = nextT;
+  static equalizeRGB(src) {
+    const dst = src.clone();
+    const d = dst.data;
+    const total = src.width * src.height;
+    const hists = this.computeHistograms(src);
+    const lutR = new Uint8Array(256), lutG = new Uint8Array(256), lutB = new Uint8Array(256);
+    let cdfR = 0, cdfG = 0, cdfB = 0;
+
+    for (let i = 0; i < 256; i++) {
+      cdfR += hists.histR[i]; cdfG += hists.histG[i]; cdfB += hists.histB[i];
+      lutR[i] = ((cdfR * 255) / total + 0.5) | 0;
+      lutG[i] = ((cdfG * 255) / total + 0.5) | 0;
+      lutB[i] = ((cdfB * 255) / total + 0.5) | 0;
     }
-    const dst = new PixelBuffer(src.width, src.height);
-    for (let y = 0; y < src.height; y++) {
-      for (let x = 0; x < src.width; x++) {
-        const v = gray[y * src.width + x] > T ? 255 : 0;
-        dst.setRGBA(x, y, v, v, v, 255);
-      }
+    for (let i = 0; i < d.length; i += 4) {
+      d[i] = lutR[d[i]]; d[i+1] = lutG[d[i+1]]; d[i+2] = lutB[d[i+2]];
     }
     return dst;
   }
 
-  static detectPoints(src, padding) {
-    const dst = new PixelBuffer(src.width, src.height);
-    const k = [-1, -1, -1, -1, 8, -1, -1, -1, -1];
-    
-    for (let y = 0; y < src.height; y++) {
-      for (let x = 0; x < src.width; x++) {
-        let sum = 0, idx = 0;
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            sum += src.getLuma(x + dx, y + dy, padding) * k[idx++];
+  static rgbToHsv(r, g, b) {
+    const rf = r/255, gf = g/255, bf = b/255;
+    const max = Math.max(rf, gf, bf), min = Math.min(rf, gf, bf);
+    const d = max - min;
+    let h = 0;
+    if (max !== min) {
+      if (max === rf) h = (gf - bf) / d + (gf < bf ? 6 : 0);
+      else if (max === gf) h = (bf - rf) / d + 2;
+      else h = (rf - gf) / d + 4;
+      h /= 6;
+    }
+    return [h, max === 0 ? 0 : d / max, max];
+  }
+
+  static hsvToRgb(h, s, v) {
+    let r = 0, g = 0, b = 0;
+    const i = Math.floor(h * 6);
+    const f = h * 6 - i;
+    const p = v * (1 - s), q = v * (1 - f * s), t = v * (1 - (1 - f) * s);
+    switch (i % 6) {
+      case 0: r = v; g = t; b = p; break;
+      case 1: r = q; g = v; b = p; break;
+      case 2: r = p; g = v; b = t; break;
+      case 3: r = p; g = q; b = v; break;
+      case 4: r = t; g = p; b = v; break;
+      case 5: r = v; g = p; b = q; break;
+    }
+    return [(r * 255 + 0.5) | 0, (g * 255 + 0.5) | 0, (b * 255 + 0.5) | 0];
+  }
+
+  static equalizeHSV(src) {
+    const dst = src.clone();
+    const d = dst.data;
+    const total = src.width * src.height;
+    const H = new Float32Array(total), S = new Float32Array(total), V = new Uint8Array(total);
+    const histV = new Uint32Array(256);
+
+    for (let i = 0, p = 0; i < total; i++, p += 4) {
+      const [h, s, v] = this.rgbToHsv(d[p], d[p+1], d[p+2]);
+      H[i] = h; S[i] = s; V[i] = (v * 255 + 0.5) | 0;
+      histV[V[i]]++;
+    }
+
+    const lutV = new Uint8Array(256);
+    let cdf = 0;
+    for (let i = 0; i < 256; i++) {
+      cdf += histV[i];
+      lutV[i] = ((cdf * 255) / total + 0.5) | 0;
+    }
+    for (let i = 0, p = 0; i < total; i++, p += 4) {
+      const [r, g, b] = this.hsvToRgb(H[i], S[i], lutV[V[i]] / 255);
+      d[p] = r; d[p+1] = g; d[p+2] = b;
+    }
+    return dst;
+  }
+
+  static claheHSV(src, tileSize = 32, clipLimit = 2.5) {
+    const dst = src.clone();
+    const d = dst.data;
+    const w = src.width, h = src.height, total = w * h;
+    const H = new Float32Array(total), S = new Float32Array(total), V = new Uint8Array(total);
+
+    for (let i = 0, p = 0; i < total; i++, p += 4) {
+      const [hv, sv, vv] = this.rgbToHsv(d[p], d[p+1], d[p+2]);
+      H[i] = hv; S[i] = sv; V[i] = (vv * 255 + 0.5) | 0;
+    }
+
+    const tX = Math.max(2, Math.ceil(w / tileSize));
+    const tY = Math.max(2, Math.ceil(h / tileSize));
+    const luts = new Uint8Array(tX * tY * 256);
+
+    for (let ty = 0; ty < tY; ty++) {
+      for (let tx = 0; tx < tX; tx++) {
+        const hist = new Float32Array(256);
+        let count = 0;
+        for (let y = ty * tileSize; y < Math.min(h, (ty + 1) * tileSize); y++) {
+          for (let x = tx * tileSize; x < Math.min(w, (tx + 1) * tileSize); x++) {
+            hist[V[y * w + x]]++; count++;
           }
         }
-        const v = Math.min(255, Math.abs(sum));
-        dst.setRGBA(x, y, v, v, v, 255);
-      }
-    }
-    return dst;
-  }
-
-  static detectHorizontalLines(src, padding) {
-    const dst = new PixelBuffer(src.width, src.height);
-    const k = [-1, -1, -1, 2, 2, 2, -1, -1, -1];
-    
-    for (let y = 0; y < src.height; y++) {
-      for (let x = 0; x < src.width; x++) {
-        let sum = 0, idx = 0;
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            sum += src.getLuma(x + dx, y + dy, padding) * k[idx++];
-          }
+        const limit = Math.max(1, (clipLimit * count) / 256);
+        let excess = 0;
+        for (let i = 0; i < 256; i++) {
+          if (hist[i] > limit) { excess += hist[i] - limit; hist[i] = limit; }
         }
-        const v = Math.min(255, Math.max(0, Math.abs(sum)));
-        dst.setRGBA(x, y, v, v, v, 255);
-      }
-    }
-    return dst;
-  }
-
-  static detectSobel(src, padding) {
-    const dst = new PixelBuffer(src.width, src.height);
-    const gxK = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
-    const gyK = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
-
-    for (let y = 0; y < src.height; y++) {
-      for (let x = 0; x < src.width; x++) {
-        let gx = 0, gy = 0, idx = 0;
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            const luma = src.getLuma(x + dx, y + dy, padding);
-            gx += luma * gxK[idx];
-            gy += luma * gyK[idx];
-            idx++;
-          }
+        const redist = excess / 256;
+        let cdf = 0;
+        const base = (ty * tX + tx) * 256;
+        for (let i = 0; i < 256; i++) {
+          hist[i] += redist;
+          cdf += hist[i];
+          luts[base + i] = Math.min(255, Math.max(0, Math.round((cdf * 255) / count)));
         }
-        const v = Math.min(255, Math.hypot(gx, gy));
-        dst.setRGBA(x, y, v, v, v, 255);
+      }
+    }
+
+    for (let y = 0; y < h; y++) {
+      const gy = (y + 0.5) / tileSize - 0.5;
+      const ty0 = Math.max(0, Math.min(tY - 1, Math.floor(gy)));
+      const ty1 = Math.max(0, Math.min(tY - 1, ty0 + 1));
+      const fy = Math.max(0, Math.min(1, gy - ty0));
+      for (let x = 0; x < w; x++) {
+        const gx = (x + 0.5) / tileSize - 0.5;
+        const tx0 = Math.max(0, Math.min(tX - 1, Math.floor(gx)));
+        const tx1 = Math.max(0, Math.min(tX - 1, tx0 + 1));
+        const fx = Math.max(0, Math.min(1, gx - tx0));
+        
+        const idx = y * w + x;
+        const val = V[idx];
+        const v00 = luts[(ty0 * tX + tx0) * 256 + val];
+        const v10 = luts[(ty0 * tX + tx1) * 256 + val];
+        const v01 = luts[(ty1 * tX + tx0) * 256 + val];
+        const v11 = luts[(ty1 * tX + tx1) * 256 + val];
+
+        const newV = ((v00 * (1 - fx) + v10 * fx) * (1 - fy) + (v01 * (1 - fx) + v11 * fx) * fy) / 255;
+        const [r, g, b] = this.hsvToRgb(H[idx], S[idx], newV);
+        d[idx*4] = r; d[idx*4+1] = g; d[idx*4+2] = b;
       }
     }
     return dst;
   }
 
-  static detectCanny(src, padding) {
+  static orderStatFilter(src, type, radius, padding) {
+    const dst = new PixelBuffer(src.width, src.height);
     const w = src.width, h = src.height;
-    const mag = new Float32Array(w * h);
-    const gxArr = new Float32Array(w * h);
-    const gyArr = new Float32Array(w * h);
-    const gxK = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
-    const gyK = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
+    const size = (2 * radius + 1) * (2 * radius + 1);
+    const rArr = new Uint8Array(size), gArr = new Uint8Array(size), bArr = new Uint8Array(size);
+    let pick = 0;
+    if (type === 'median') pick = Math.floor(size / 2);
+    else if (type === 'max') pick = size - 1;
 
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
-        let gx = 0, gy = 0, idx = 0;
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            let l = 0;
-            let nx = x + dx, ny = y + dy;
-            if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
-              l = (0.299*src.data[(ny*w+nx)*4] + 0.587*src.data[(ny*w+nx)*4+1] + 0.114*src.data[(ny*w+nx)*4+2]);
-            } else {
-              l = src.getLuma(nx, ny, padding);
-            }
-            gx += l * gxK[idx];
-            gy += l * gyK[idx];
-            idx++;
+        let i = 0;
+        for (let dy = -radius; dy <= radius; dy++) {
+          for (let dx = -radius; dx <= radius; dx++) {
+            const idx = src.getOffset(x + dx, y + dy, padding);
+            rArr[i] = src.data[idx]; gArr[i] = src.data[idx+1]; bArr[i] = src.data[idx+2];
+            i++;
           }
         }
-        const i = y * w + x;
-        gxArr[i] = gx; gyArr[i] = gy;
-        mag[i] = Math.hypot(gx, gy);
+        rArr.sort(); gArr.sort(); bArr.sort();
+        dst.setRGBA(x, y, rArr[pick], gArr[pick], bArr[pick], 255);
       }
-    }
-
-    const nms = new Float32Array(w * h);
-    for (let y = 1; y < h - 1; y++) {
-      for (let x = 1; x < w - 1; x++) {
-        const i = y * w + x;
-        const m = mag[i];
-        if (m === 0) continue;
-        const ax = Math.abs(gxArr[i]), ay = Math.abs(gyArr[i]);
-        let m1 = 0, m2 = 0;
-        if (ax >= ay) {
-          const w_ = ay / ax;
-          const s = (gxArr[i] * gyArr[i] >= 0) ? 1 : -1;
-          m1 = (1 - w_) * mag[i + 1] + w_ * mag[(y + s) * w + (x + 1)];
-          m2 = (1 - w_) * mag[i - 1] + w_ * mag[(y - s) * w + (x - 1)];
-        } else {
-          const w_ = ax / ay;
-          const s = (gxArr[i] * gyArr[i] >= 0) ? 1 : -1;
-          m1 = (1 - w_) * mag[(y + 1) * w + x] + w_ * mag[(y + 1) * w + (x + s)];
-          m2 = (1 - w_) * mag[(y - 1) * w + x] + w_ * mag[(y - 1) * w + (x - s)];
-        }
-        if (m >= m1 && m >= m2) nms[i] = m;
-      }
-    }
-
-    const state = new Uint8Array(w * h);
-    const stack = [];
-    const highT = 80, lowT = 30;
-    for (let i = 0; i < nms.length; i++) {
-      if (nms[i] >= highT) { state[i] = 2; stack.push(i); }
-      else if (nms[i] >= lowT) state[i] = 1;
-    }
-
-    while (stack.length > 0) {
-      const i = stack.pop();
-      const cx = i % w, cy = (i / w) | 0;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const nx = cx + dx, ny = cy + dy;
-          if (nx >= 0 && nx < w && ny >= 0 && ny < h) {
-            const ni = ny * w + nx;
-            if (state[ni] === 1) { state[ni] = 2; stack.push(ni); }
-          }
-        }
-      }
-    }
-
-    const dst = new PixelBuffer(w, h);
-    for (let i = 0; i < state.length; i++) {
-      const v = state[i] === 2 ? 255 : 0;
-      dst.data[i*4] = v; dst.data[i*4+1] = v; dst.data[i*4+2] = v; dst.data[i*4+3] = 255;
     }
     return dst;
   }
