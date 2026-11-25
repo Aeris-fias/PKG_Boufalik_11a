@@ -162,19 +162,19 @@ class AppUI {
   drawHistogram(histData, canvas) {
     const rect = canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
-    const width = Math.max(360, Math.round(rect.width || 520));
-    const height = 175;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
+    const width = Math.max(320, Math.round(rect.width || 520));
+    const height = 185;
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
 
     const ctx = canvas.getContext("2d");
-    ctx.scale(dpr, dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, width, height);
 
     const padLeft = 14;
     const padRight = 14;
-    const padTop = 24;
-    const padBottom = 22;
+    const padTop = 26;
+    const padBottom = 24;
     const plotW = width - padLeft - padRight;
     const plotH = height - padTop - padBottom;
 
@@ -239,7 +239,7 @@ class AppUI {
     ticks.forEach((t, idx) => {
       const x = padLeft + (t / 255) * plotW;
       ctx.textAlign = idx === 0 ? "left" : (idx === ticks.length - 1 ? "right" : "center");
-      ctx.fillText(String(t), x, padTop + plotH + 5);
+      ctx.fillText(String(t), x, padTop + plotH + 6);
     });
 
     const legend = [
@@ -253,9 +253,9 @@ class AppUI {
     ctx.textBaseline = "middle";
     legend.forEach(item => {
       ctx.fillStyle = item.color;
-      ctx.fillRect(lx, 9, 10, 4);
+      ctx.fillRect(lx, 10, 10, 4);
       ctx.fillStyle = "#475569";
-      ctx.fillText(item.label, lx + 14, 11);
+      ctx.fillText(item.label, lx + 14, 12);
       lx += 14 + ctx.measureText(item.label).width + 12;
     });
   }
