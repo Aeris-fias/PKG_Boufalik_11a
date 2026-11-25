@@ -144,6 +144,8 @@ class AppUI {
         </div>`;
       document.getElementById("param_t").addEventListener("input", (e) => document.getElementById("val_t").textContent = e.target.value);
       document.getElementById("param_c").addEventListener("input", (e) => document.getElementById("val_c").textContent = e.target.value);
+    } else {
+      container.innerHTML = `<div style="font-size:12.5px; color:var(--text-muted);">Автоматический расчет без параметров</div>`;
     }
   }
 
@@ -158,21 +160,104 @@ class AppUI {
   }
 
   drawHistogram(histData, canvas) {
-    const ctx = canvas.getContext("2d");
-    const w = canvas.width = 512;
-    const h = canvas.height = 120;
-    ctx.clearRect(0, 0, w, h);
-    let maxVal = 1;
-    for (let i = 1; i < 255; i++) maxVal = Math.max(maxVal, histData.histL[i]);
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const width = Math.max(360, Math.round(rect.width || 520));
+    const height = 175;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
 
-    ctx.beginPath();
-    ctx.moveTo(0, h);
-    for (let i = 0; i < 256; i++) {
-      ctx.lineTo((i / 255) * w, h - Math.min(1, histData.histL[i] / maxVal) * (h - 5));
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, width, height);
+
+    const padLeft = 14;
+    const padRight = 14;
+    const padTop = 24;
+    const padBottom = 22;
+    const plotW = width - padLeft - padRight;
+    const plotH = height - padTop - padBottom;
+
+    ctx.fillStyle = "#f8fafc";
+    ctx.fillRect(padLeft, padTop, plotW, plotH);
+
+    ctx.strokeStyle = "#e2e8f0";
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const y = padTop + (plotH / 4) * i;
+      ctx.beginPath();
+      ctx.moveTo(padLeft, y);
+      ctx.lineTo(padLeft + plotW, y);
+      ctx.stroke();
+
+      const x = padLeft + (plotW / 4) * i;
+      ctx.beginPath();
+      ctx.moveTo(x, padTop);
+      ctx.lineTo(x, padTop + plotH);
+      ctx.stroke();
     }
-    ctx.lineTo(w, h);
-    ctx.fillStyle = "rgba(59, 130, 246, 0.7)";
-    ctx.fill();
+
+    let maxVal = 1;
+    for (let i = 1; i < 255; i++) {
+      maxVal = Math.max(maxVal, histData.histR[i], histData.histG[i], histData.histB[i], histData.histL[i]);
+    }
+    maxVal = Math.max(maxVal, histData.histL[0] * 0.5, histData.histL[255] * 0.5);
+
+    const drawSeries = (arr, strokeColor, fillColor = null) => {
+      ctx.beginPath();
+      if (fillColor) ctx.moveTo(padLeft, padTop + plotH);
+      for (let i = 0; i < 256; i++) {
+        const x = padLeft + (i / 255) * plotW;
+        const norm = Math.min(1, arr[i] / maxVal);
+        const y = padTop + plotH - norm * (plotH - 4);
+        if (i === 0 && !fillColor) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      if (fillColor) {
+        ctx.lineTo(padLeft + plotW, padTop + plotH);
+        ctx.closePath();
+        ctx.fillStyle = fillColor;
+        ctx.fill();
+      }
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = fillColor ? 1.8 : 1.4;
+      ctx.stroke();
+    };
+
+    drawSeries(histData.histL, "rgba(71, 85, 105, 0.75)", "rgba(148, 163, 184, 0.25)");
+    drawSeries(histData.histR, "#ef4444");
+    drawSeries(histData.histG, "#10b981");
+    drawSeries(histData.histB, "#3b82f6");
+
+    ctx.strokeStyle = "#cbd5e1";
+    ctx.strokeRect(padLeft, padTop, plotW, plotH);
+
+    ctx.fillStyle = "#64748b";
+    ctx.font = "11px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.textBaseline = "top";
+    const ticks = [0, 64, 128, 192, 255];
+    ticks.forEach((t, idx) => {
+      const x = padLeft + (t / 255) * plotW;
+      ctx.textAlign = idx === 0 ? "left" : (idx === ticks.length - 1 ? "right" : "center");
+      ctx.fillText(String(t), x, padTop + plotH + 5);
+    });
+
+    const legend = [
+      { label: "Luma", color: "#475569" },
+      { label: "R", color: "#ef4444" },
+      { label: "G", color: "#10b981" },
+      { label: "B", color: "#3b82f6" }
+    ];
+    let lx = padLeft;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    legend.forEach(item => {
+      ctx.fillStyle = item.color;
+      ctx.fillRect(lx, 9, 10, 4);
+      ctx.fillStyle = "#475569";
+      ctx.fillText(item.label, lx + 14, 11);
+      lx += 14 + ctx.measureText(item.label).width + 12;
+    });
   }
 
   processImage() {
@@ -218,4 +303,12 @@ class AppUI {
   }
 }
 
-window.addEventListener("DOMContentLoaded", () => new AppUI());
+window.addEventListener("DOMContentLoaded", () => {
+  const app = new AppUI();
+  window.addEventListener("resize", () => {
+    if (app.srcBuffer && app.dstBuffer) {
+      app.drawHistogram(ImageAlgorithms.computeHistograms(app.srcBuffer), app.srcHistCanvas);
+      app.drawHistogram(ImageAlgorithms.computeHistograms(app.dstBuffer), app.dstHistCanvas);
+    }
+  });
+});
